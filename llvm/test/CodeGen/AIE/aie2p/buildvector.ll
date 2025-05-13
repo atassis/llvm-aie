@@ -83,3 +83,23 @@ entry:
   ret void
 }
 
+define void @test_buildvector_64bits() {
+; CHECK-LABEL: test_buildvector_64bits:
+; CHECK:         .p2align 4
+; CHECK-NEXT:  // %bb.0: // %entry
+; CHECK-NEXT:    mova r0, #777; nopx
+; CHECK-NEXT:    vpush.hi.16 x0, x0, r0
+; CHECK-NEXT:    vpush.hi.16 x0, x0, r0
+; CHECK-NEXT:    vpush.hi.16 x0, x0, r0
+; CHECK-NEXT:    vpush.hi.16 x0, x0, r0
+; CHECK-NEXT:    vextract.64 r1:r0, x0, #0, vaddsign1
+; CHECK-NEXT:    ret lr
+; CHECK-NEXT:    mova p0, #0 // Delay Slot 5
+; CHECK-NEXT:    st r0, [p0, #0] // Delay Slot 4
+; CHECK-NEXT:    mova p0, #4 // Delay Slot 3
+; CHECK-NEXT:    st r1, [p0, #0] // Delay Slot 2
+; CHECK-NEXT:    nop // Delay Slot 1
+entry:
+  store <4 x i16> <i16 777, i16 777, i16 777, i16 777>, ptr addrspace(6) null, align 32
+  ret void
+}

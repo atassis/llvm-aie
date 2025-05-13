@@ -65,11 +65,11 @@ isValidVectorMergeUnmergeOp(const unsigned BigVectorId,
   };
 }
 
-static LegalityPredicate isValidVectorAIEP(const unsigned TypeIdx) {
+static LegalityPredicate isValidVectorAIE2P(const unsigned TypeIdx) {
   return [=](const LegalityQuery &Query) {
     const LLT DstTy = Query.Types[TypeIdx];
     const unsigned DstSize = DstTy.getSizeInBits();
-    return DstTy.isVector() && (DstSize == 32 || DstSize > 64);
+    return DstTy.isVector() && DstSize >= 32;
   };
 }
 
@@ -605,7 +605,7 @@ AIE2PLegalizerInfo::AIE2PLegalizerInfo(const AIE2PSubtarget &ST)
       .customIf(typeInSet(0, {V2S8, S16}));
 
   const LegalityPredicate IsNotValidDestinationVector =
-      negatePredicate(isValidVectorAIEP(0));
+      negatePredicate(isValidVectorAIE2P(0));
 
   getActionDefinitionsBuilder(G_MERGE_VALUES).legalFor({{S64, S32}});
   getActionDefinitionsBuilder(G_UNMERGE_VALUES)
