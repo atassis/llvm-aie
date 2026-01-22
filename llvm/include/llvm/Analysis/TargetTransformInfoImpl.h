@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Modifications (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its
+// Modifications (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its
 // affiliates
 //
 //===----------------------------------------------------------------------===//
@@ -281,6 +281,18 @@ public:
   TTI::AddressingModeKind
     getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const {
     return TTI::AMK_None;
+  }
+
+  /// By default, do not look through truncs in IVUsers.
+  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const { return false; }
+
+  /// By default, only legal integer widths up to 64 bits are valid for IV
+  /// users.
+  bool isValidIVUserType(Type *Ty) const {
+    if (!Ty->isIntegerTy())
+      return false;
+    unsigned Width = Ty->getIntegerBitWidth();
+    return Width <= 64 && DL.isLegalInteger(Width);
   }
 
   bool isLegalMaskedStore(Type *DataType, Align Alignment) const {

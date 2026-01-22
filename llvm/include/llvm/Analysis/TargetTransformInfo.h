@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Modifications (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its
+// Modifications (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its
 // affiliates
 //
 //===----------------------------------------------------------------------===//
@@ -66,6 +66,7 @@ class SmallBitVector;
 class StoreInst;
 class SwitchInst;
 class TargetLibraryInfo;
+class TruncInst;
 class Type;
 class VPIntrinsic;
 struct KnownBits;
@@ -797,6 +798,20 @@ public:
   /// Return the preferred addressing mode LSR should make efforts to generate.
   AddressingModeKind getPreferredAddressingMode(const Loop *L,
                                                 ScalarEvolution *SE) const;
+
+  /// Return true if IVUsers should look through a trunc instruction to collect
+  /// the users of its result (typically GEPs) instead of the trunc itself.
+  /// This is useful for targets like AIE with non-native pointer sizes (e.g.,
+  /// 20-bit pointers with 32-bit integers) where truncs to the index size
+  /// are used before GEP indices. Looking through such truncs allows LSR to
+  /// create pointer PHIs instead of integer PHIs.
+  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const;
+
+  /// Return true if the given type is valid for IV user collection.
+  /// By default, only legal integer widths up to 64 bits are allowed.
+  /// Targets with non-native pointer sizes may override this to allow
+  /// index-sized integers or pointers.
+  bool isValidIVUserType(Type *Ty) const;
 
   /// Return true if the target supports masked store.
   bool isLegalMaskedStore(Type *DataType, Align Alignment) const;
@@ -2009,6 +2024,8 @@ public:
                           TargetLibraryInfo *LibInfo) = 0;
   virtual AddressingModeKind
     getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const = 0;
+  virtual bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const = 0;
+  virtual bool isValidIVUserType(Type *Ty) const = 0;
   virtual bool isLegalMaskedStore(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalNTStore(Type *DataType, Align Alignment) = 0;
@@ -2552,6 +2569,12 @@ public:
     getPreferredAddressingMode(const Loop *L,
                                ScalarEvolution *SE) const override {
     return Impl.getPreferredAddressingMode(L, SE);
+  }
+  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const override {
+    return Impl.shouldIVUsersLookThroughTrunc(Trunc);
+  }
+  bool isValidIVUserType(Type *Ty) const override {
+    return Impl.isValidIVUserType(Ty);
   }
   bool isLegalMaskedStore(Type *DataType, Align Alignment) override {
     return Impl.isLegalMaskedStore(DataType, Alignment);

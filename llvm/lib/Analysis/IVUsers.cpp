@@ -4,6 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Modifications (c) Copyright 2026 Advanced Micro Devices, Inc. or its
+// affiliates
+//
 //===----------------------------------------------------------------------===//
 //
 // This file implements bookkeeping for "interesting" users of expressions
@@ -18,6 +21,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DataLayout.h"
@@ -35,7 +39,7 @@ AnalysisKey IVUsersAnalysis::Key;
 
 IVUsers IVUsersAnalysis::run(Loop &L, LoopAnalysisManager &AM,
                              LoopStandardAnalysisResults &AR) {
-  return IVUsers(&L, &AR.AC, &AR.LI, &AR.DT, &AR.SE);
+  return IVUsers(&L, &AR.AC, &AR.LI, &AR.DT, &AR.SE, &AR.TTI);
 }
 
 char IVUsersWrapperPass::ID = 0;
@@ -153,8 +157,12 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
   // LSR is not APInt clean, do not touch integers bigger than 64-bits.
   // Also avoid creating IVs of non-native types. For example, we don't want a
   // 64-bit IV in 32-bit code just because the loop has one 64-bit cast.
-  uint64_t Width = SE->getTypeSizeInBits(I->getType());
-  if (Width > 64 || !DL.isLegalInteger(Width))
+  // Use TTI hook if available to allow targets with non-native pointer sizes
+  // (e.g., AIE with 20-bit pointers) to enable IV user collection.
+  const uint64_t Width = SE->getTypeSizeInBits(I->getType());
+  const bool IsValidType = TTI ? TTI->isValidIVUserType(I->getType())
+                               : (Width <= 64 && DL.isLegalInteger(Width));
+  if (!IsValidType)
     return false;
 
   // Don't attempt to promote ephemeral values to indvars. They will be removed
@@ -169,6 +177,24 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
   // call this a user.
   if (!isInteresting(ISE, I, L, SE, LI))
     return false;
+
+  // Special case: if this is a trunc used solely as GEP indices, look through
+  // to the GEP results instead. This allows LSR to create pointer PHIs for
+  // targets with non-native pointer sizes (like AIE's 20-bit pointers).
+  // Use TTI hook to determine if we should look through this trunc.
+  if (auto *Trunc = dyn_cast<TruncInst>(I)) {
+    if (TTI && TTI->shouldIVUsersLookThroughTrunc(Trunc)) {
+      LLVM_DEBUG(dbgs() << "Looking through trunc to GEP: " << *I << '\n');
+      bool AnyInteresting = false;
+      for (Use &U : I->uses()) {
+        auto *GEP = cast<GetElementPtrInst>(U.getUser());
+        // Recursively process the GEP result instead of the trunc
+        if (AddUsersIfInteresting(GEP))
+          AnyInteresting = true;
+      }
+      return AnyInteresting;
+    }
+  }
 
   SmallPtrSet<Instruction *, 4> UniqueUsers;
   for (Use &U : I->uses()) {
@@ -249,8 +275,8 @@ IVStrideUse &IVUsers::AddUser(Instruction *User, Value *Operand) {
 }
 
 IVUsers::IVUsers(Loop *L, AssumptionCache *AC, LoopInfo *LI, DominatorTree *DT,
-                 ScalarEvolution *SE)
-    : L(L), AC(AC), LI(LI), DT(DT), SE(SE) {
+                 ScalarEvolution *SE, const TargetTransformInfo *TTI)
+    : L(L), AC(AC), LI(LI), DT(DT), SE(SE), TTI(TTI) {
   // Collect ephemeral values so that AddUsersIfInteresting skips them.
   EphValues.clear();
   CodeMetrics::collectEphemeralValues(L, AC, EphValues);
@@ -306,6 +332,7 @@ void IVUsersWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addRequired<ScalarEvolutionWrapperPass>();
+  AU.addRequired<TargetTransformInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
@@ -315,8 +342,10 @@ bool IVUsersWrapperPass::runOnLoop(Loop *L, LPPassManager &LPM) {
   auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   auto *DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  auto *TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
+      *L->getHeader()->getParent());
 
-  IU.reset(new IVUsers(L, AC, LI, DT, SE));
+  IU.reset(new IVUsers(L, AC, LI, DT, SE, TTI));
   return false;
 }
 

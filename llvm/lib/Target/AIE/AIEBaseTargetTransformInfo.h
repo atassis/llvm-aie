@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2024-2025 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2024-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,6 +56,17 @@ private:
   const AIEBaseTargetLowering *getTLI() const { return TLI; }
   /// Helper function to access this as a T.
   T *thisT() { return static_cast<T *>(this); }
+
+  /// Check that all uses of Trunc are GEP index operands (not pointer operand).
+  static bool allUsesAreGEPIndices(const TruncInst *Trunc) {
+    for (const Use &U : Trunc->uses()) {
+      const auto *GEP = dyn_cast<GetElementPtrInst>(U.getUser());
+      const bool IsGEPIndexUse = GEP && U.getOperandNo() != 0;
+      if (!IsGEPIndexUse)
+        return false;
+    }
+    return true;
+  }
 
 protected:
   explicit AIEBaseTTIImpl(const TargetMachine *TM, const DataLayout &DL,
@@ -113,6 +124,73 @@ public:
     // considered by default by the pass.
     // Default return of allowsMisalignedMemoryAccesses is false.
     return ChainSizeInBytes >= 4;
+  }
+
+  /// AIE has post-increment load/store instructions (VLD_pstm, VST_pstm) that
+  /// fold pointer updates into memory operations for free. This tells LSR to
+  /// prefer pointer-based recurrences over scalar offset + base formulations,
+  /// which would require explicit PADD instructions.
+  TTI::AddressingModeKind
+  getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const {
+    return TTI::AMK_PostIndexed;
+  }
+
+  /// AIE supports post-increment loads (VLD_pstm).
+  bool isIndexedLoadLegal(TTI::MemIndexedMode Mode, Type *Ty,
+                          const DataLayout &DL) const {
+    // Return true for post-increment mode when the type is either:
+    // 1. A pointer type (for preserving pointer recurrences), OR
+    // 2. An integer type matching the index size (i20 on AIE) - this enables
+    //    LSR to preserve index recurrences that feed into GEPs, similar to how
+    //    ARM/Hexagon handle i32 indices.
+    if (Mode != TTI::MIM_PostInc)
+      return false;
+    return Ty->isPointerTy() ||
+           (Ty->isIntegerTy() &&
+            Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0));
+  }
+
+  /// AIE supports post-increment stores (VST_pstm).
+  bool isIndexedStoreLegal(TTI::MemIndexedMode Mode, Type *Ty,
+                           const DataLayout &DL) const {
+    // Same logic as isIndexedLoadLegal.
+    if (Mode != TTI::MIM_PostInc)
+      return false;
+    return Ty->isPointerTy() ||
+           (Ty->isIntegerTy() &&
+            Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0));
+  }
+
+  /// Look through truncs to index size that feed GEP indices.
+  /// This allows LSR to create pointer PHIs for 20-bit pointers.
+  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const {
+    if (!Trunc)
+      return false;
+
+    const DataLayout &DL = Trunc->getModule()->getDataLayout();
+    const unsigned TruncWidth = Trunc->getType()->getIntegerBitWidth();
+    const unsigned IndexWidth = DL.getIndexSizeInBits(0);
+
+    const bool IsTruncToIndexSize = (TruncWidth == IndexWidth);
+    const bool IsNonLegalIndexSize = !DL.isLegalInteger(TruncWidth);
+    if (!IsTruncToIndexSize || !IsNonLegalIndexSize)
+      return false;
+
+    return allUsesAreGEPIndices(Trunc);
+  }
+
+  /// Allow index-sized integers and pointers as valid IV user types.
+  bool isValidIVUserType(Type *Ty) const {
+    const DataLayout &DL = BaseT::getDataLayout();
+    const uint64_t Width = DL.getTypeSizeInBits(Ty);
+    const unsigned IndexWidth = DL.getIndexSizeInBits(0);
+
+    const bool IsLegalInteger =
+        Ty->isIntegerTy() && Width <= 64 && DL.isLegalInteger(Width);
+    const bool IsIndexSizedInteger = Ty->isIntegerTy() && Width == IndexWidth;
+    const bool IsIndexSizedPointer = Ty->isPointerTy() && Width == IndexWidth;
+
+    return IsLegalInteger || IsIndexSizedInteger || IsIndexSizedPointer;
   }
 };
 
