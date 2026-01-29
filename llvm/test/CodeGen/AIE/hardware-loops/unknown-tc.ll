@@ -4,41 +4,71 @@
 ; See https://llvm.org/LICENSE.txt for license information.
 ; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 ;
-; (c) Copyright 2023-2025 Advanced Micro Devices, Inc. or its affiliates
+; (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its affiliates
 
-; RUN: llc -O2 -mtriple=aie2 --issue-limit=1 %s -o - | FileCheck %s
-; RUN: llc -O2 -mtriple=aie2p --issue-limit=1 %s -o - | FileCheck %s
+; RUN: llc -O2 -mtriple=aie2 --issue-limit=1 %s -o - | FileCheck %s --check-prefix=AIE2
+; RUN: llc -O2 -mtriple=aie2p --issue-limit=1 %s -o - | FileCheck %s --check-prefix=AIE2P
 
 define void @cbz_exit(ptr %in, ptr %res) {
-; CHECK-LABEL: cbz_exit:
-; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    mova r0, #-1; nopb ; nopxm
-; CHECK-NEXT:    mova r1, #2
-; CHECK-NEXT:  .LBB0_1: // %loop
-; CHECK-NEXT:    // =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    add r0, r0, #1
-; CHECK-NEXT:    lshl r2, r0, r1
-; CHECK-NEXT:    mov dj0, r2
-; CHECK-NEXT:    lda r2, [p0, dj0]
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    jnz r2, #.LBB0_1
-; CHECK-NEXT:    nop // Delay Slot 5
-; CHECK-NEXT:    nop // Delay Slot 4
-; CHECK-NEXT:    nop // Delay Slot 3
-; CHECK-NEXT:    nop // Delay Slot 2
-; CHECK-NEXT:    nop // Delay Slot 1
-; CHECK-NEXT:  // %bb.2: // %exit
-; CHECK-NEXT:    ret lr
-; CHECK-NEXT:    nop // Delay Slot 5
-; CHECK-NEXT:    nop // Delay Slot 4
-; CHECK-NEXT:    nop // Delay Slot 3
-; CHECK-NEXT:    st r0, [p1, #0] // Delay Slot 2
-; CHECK-NEXT:    nop // Delay Slot 1
+; AIE2-LABEL: cbz_exit:
+; AIE2:       // %bb.0: // %entry
+; AIE2-NEXT:    mova r0, #-1; nopb ; nopxm
+; AIE2-NEXT:    mova r1, #2
+; AIE2-NEXT:  .LBB0_1: // %loop
+; AIE2-NEXT:    // =>This Inner Loop Header: Depth=1
+; AIE2-NEXT:    nopa ; nopb ; add r0, r0, #1
+; AIE2-NEXT:    lshl r2, r0, r1
+; AIE2-NEXT:    mov dj0, r2
+; AIE2-NEXT:    lda r2, [p0, dj0]
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    jnz r2, #.LBB0_1
+; AIE2-NEXT:    nop // Delay Slot 5
+; AIE2-NEXT:    nop // Delay Slot 4
+; AIE2-NEXT:    nop // Delay Slot 3
+; AIE2-NEXT:    nop // Delay Slot 2
+; AIE2-NEXT:    nop // Delay Slot 1
+; AIE2-NEXT:  // %bb.2: // %exit
+; AIE2-NEXT:    ret lr
+; AIE2-NEXT:    nop // Delay Slot 5
+; AIE2-NEXT:    nop // Delay Slot 4
+; AIE2-NEXT:    nop // Delay Slot 3
+; AIE2-NEXT:    st r0, [p1, #0] // Delay Slot 2
+; AIE2-NEXT:    nop // Delay Slot 1
+;
+; AIE2P-LABEL: cbz_exit:
+; AIE2P:       // %bb.0: // %entry
+; AIE2P-NEXT:    mova r0, #-1; nopb ; nopxm
+; AIE2P-NEXT:    mova r1, #2
+; AIE2P-NEXT:  .LBB0_1: // %loop
+; AIE2P-NEXT:    // =>This Inner Loop Header: Depth=1
+; AIE2P-NEXT:    nopa ; nopb ; add r0, r0, #1
+; AIE2P-NEXT:    lshl r2, r0, r1
+; AIE2P-NEXT:    mov dj0, r2
+; AIE2P-NEXT:    lda r2, [p0, dj0]
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    jnz r2, #.LBB0_1
+; AIE2P-NEXT:    nop // Delay Slot 5
+; AIE2P-NEXT:    nop // Delay Slot 4
+; AIE2P-NEXT:    nop // Delay Slot 3
+; AIE2P-NEXT:    nop // Delay Slot 2
+; AIE2P-NEXT:    nop // Delay Slot 1
+; AIE2P-NEXT:  // %bb.2: // %exit
+; AIE2P-NEXT:    ret lr
+; AIE2P-NEXT:    nop // Delay Slot 5
+; AIE2P-NEXT:    nop // Delay Slot 4
+; AIE2P-NEXT:    nop // Delay Slot 3
+; AIE2P-NEXT:    st r0, [p1, #0] // Delay Slot 2
+; AIE2P-NEXT:    nop // Delay Slot 1
 entry:
   br label %loop
 
@@ -56,35 +86,65 @@ exit:
 }
 
 define void @cbnz_exit(ptr %in, ptr %res) {
-; CHECK-LABEL: cbnz_exit:
-; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    mova r0, #-1; nopb ; nopxm
-; CHECK-NEXT:    mova r1, #2
-; CHECK-NEXT:  .LBB1_1: // %loop
-; CHECK-NEXT:    // =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    add r0, r0, #1
-; CHECK-NEXT:    lshl r2, r0, r1
-; CHECK-NEXT:    mov dj0, r2
-; CHECK-NEXT:    lda r2, [p0, dj0]
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    nop
-; CHECK-NEXT:    jz r2, #.LBB1_1
-; CHECK-NEXT:    nop // Delay Slot 5
-; CHECK-NEXT:    nop // Delay Slot 4
-; CHECK-NEXT:    nop // Delay Slot 3
-; CHECK-NEXT:    nop // Delay Slot 2
-; CHECK-NEXT:    nop // Delay Slot 1
-; CHECK-NEXT:  // %bb.2: // %exit
-; CHECK-NEXT:    ret lr
-; CHECK-NEXT:    nop // Delay Slot 5
-; CHECK-NEXT:    nop // Delay Slot 4
-; CHECK-NEXT:    nop // Delay Slot 3
-; CHECK-NEXT:    st r0, [p1, #0] // Delay Slot 2
-; CHECK-NEXT:    nop // Delay Slot 1
+; AIE2-LABEL: cbnz_exit:
+; AIE2:       // %bb.0: // %entry
+; AIE2-NEXT:    mova r0, #-1; nopb ; nopxm
+; AIE2-NEXT:    mova r1, #2
+; AIE2-NEXT:  .LBB1_1: // %loop
+; AIE2-NEXT:    // =>This Inner Loop Header: Depth=1
+; AIE2-NEXT:    nopa ; nopb ; add r0, r0, #1
+; AIE2-NEXT:    lshl r2, r0, r1
+; AIE2-NEXT:    mov dj0, r2
+; AIE2-NEXT:    lda r2, [p0, dj0]
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    nop
+; AIE2-NEXT:    jz r2, #.LBB1_1
+; AIE2-NEXT:    nop // Delay Slot 5
+; AIE2-NEXT:    nop // Delay Slot 4
+; AIE2-NEXT:    nop // Delay Slot 3
+; AIE2-NEXT:    nop // Delay Slot 2
+; AIE2-NEXT:    nop // Delay Slot 1
+; AIE2-NEXT:  // %bb.2: // %exit
+; AIE2-NEXT:    ret lr
+; AIE2-NEXT:    nop // Delay Slot 5
+; AIE2-NEXT:    nop // Delay Slot 4
+; AIE2-NEXT:    nop // Delay Slot 3
+; AIE2-NEXT:    st r0, [p1, #0] // Delay Slot 2
+; AIE2-NEXT:    nop // Delay Slot 1
+;
+; AIE2P-LABEL: cbnz_exit:
+; AIE2P:       // %bb.0: // %entry
+; AIE2P-NEXT:    mova r0, #-1; nopb ; nopxm
+; AIE2P-NEXT:    mova r1, #2
+; AIE2P-NEXT:  .LBB1_1: // %loop
+; AIE2P-NEXT:    // =>This Inner Loop Header: Depth=1
+; AIE2P-NEXT:    nopa ; nopb ; add r0, r0, #1
+; AIE2P-NEXT:    lshl r2, r0, r1
+; AIE2P-NEXT:    mov dj0, r2
+; AIE2P-NEXT:    lda r2, [p0, dj0]
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    nop
+; AIE2P-NEXT:    jz r2, #.LBB1_1
+; AIE2P-NEXT:    nop // Delay Slot 5
+; AIE2P-NEXT:    nop // Delay Slot 4
+; AIE2P-NEXT:    nop // Delay Slot 3
+; AIE2P-NEXT:    nop // Delay Slot 2
+; AIE2P-NEXT:    nop // Delay Slot 1
+; AIE2P-NEXT:  // %bb.2: // %exit
+; AIE2P-NEXT:    ret lr
+; AIE2P-NEXT:    nop // Delay Slot 5
+; AIE2P-NEXT:    nop // Delay Slot 4
+; AIE2P-NEXT:    nop // Delay Slot 3
+; AIE2P-NEXT:    st r0, [p1, #0] // Delay Slot 2
+; AIE2P-NEXT:    nop // Delay Slot 1
 entry:
   br label %loop
 
