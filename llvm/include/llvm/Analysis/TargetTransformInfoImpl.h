@@ -283,8 +283,15 @@ public:
     return TTI::AMK_None;
   }
 
-  /// By default, do not look through truncs in IVUsers.
-  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const { return false; }
+  /// By default, do not look through instructions in IVUsers.
+  bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const {
+    return false;
+  }
+
+  /// By default, do not preserve basic recurrences for non-standard types.
+  bool shouldLSRPreserveBasicRecurrence(Type *Ty) const { return false; }
 
   /// By default, only legal integer widths up to 64 bits are valid for IV
   /// users.

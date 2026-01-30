@@ -3896,46 +3896,36 @@ static const SCEV *CollectSubexprs(const SCEV *S, const SCEVConstant *C,
 static bool mayUsePostIncMode(const TargetTransformInfo &TTI,
                               LSRUse &LU, const SCEV *S, const Loop *L,
                               ScalarEvolution &SE) {
-  // For Address uses, the access type must be int or int vector.
-  // For Basic uses with pointer type (e.g., feeding addrspacecast) or with
-  // index-sized integer type (e.g., feeding GEP index), we also want to
-  // preserve recurrences to enable post-increment combining.
+  // Standard check: Address uses with int/int-vector access type.
   const bool IsAddressUseWithIntAccess =
       (LU.Kind == LSRUse::Address &&
        LU.AccessTy.getType()->isIntOrIntVectorTy());
-  const bool IsBasicUseWithPointerType =
+
+  // Allow targets to preserve recurrences for Basic uses with specific types.
+  // This enables post-increment optimization for targets with non-native
+  // pointer sizes (e.g., AIE with 20-bit pointers and i20 GEP indices).
+  const bool IsBasicUseWithPreservedType =
       (LU.Kind == LSRUse::Basic && LU.WidestFixupType &&
-       LU.WidestFixupType->isPointerTy());
-  // Also allow Basic uses with index-sized integer type (e.g., i20 on AIE).
-  // These are typically GEP index operands that could benefit from
-  // post-increment addressing if LSR preserves the recurrence structure.
-  const DataLayout &DL = SE.getDataLayout();
-  const bool IsBasicUseWithIndexSizedInt =
-      (LU.Kind == LSRUse::Basic && LU.WidestFixupType &&
-       LU.WidestFixupType->isIntegerTy() &&
-       LU.WidestFixupType->getIntegerBitWidth() == DL.getIndexSizeInBits(0));
-  if (!IsAddressUseWithIntAccess && !IsBasicUseWithPointerType &&
-      !IsBasicUseWithIndexSizedInt)
+       TTI.shouldLSRPreserveBasicRecurrence(LU.WidestFixupType));
+
+  if (!IsAddressUseWithIntAccess && !IsBasicUseWithPreservedType)
     return false;
+
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(S);
   if (!AR)
     return false;
+
   const SCEV *LoopStep = AR->getStepRecurrence(SE);
-  // The step must be either constant or loop-invariant for post-increment to
-  // work. AIE supports post-increment with variable (but loop-invariant)
-  // strides, so we allow loop-invariant steps when the target supports indexed
-  // loads/stores.
   const bool IsConstantStep = isa<SCEVConstant>(LoopStep);
   const bool IsLoopInvariantStep = SE.isLoopInvariant(LoopStep, L);
   if (!IsConstantStep && !IsLoopInvariantStep)
     return false;
+
   // Check if a post-indexed load/store can be used.
   if (TTI.isIndexedLoadLegal(TTI.MIM_PostInc, AR->getType()) ||
       TTI.isIndexedStoreLegal(TTI.MIM_PostInc, AR->getType())) {
     const SCEV *LoopStart = AR->getStart();
-    // For pointer recurrences, the start is typically a loop-invariant base
-    // pointer. For index recurrences (like i20 on AIE), the start can be a
-    // small constant offset. We want to preserve both patterns.
+    // Accept constant starts (e.g., offset 0) or loop-invariant base pointers.
     if (isa<SCEVConstant>(LoopStart) || SE.isLoopInvariant(LoopStart, L))
       return true;
   }

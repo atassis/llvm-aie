@@ -178,22 +178,17 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
   if (!isInteresting(ISE, I, L, SE, LI))
     return false;
 
-  // Special case: if this is a trunc used solely as GEP indices, look through
-  // to the GEP results instead. This allows LSR to create pointer PHIs for
-  // targets with non-native pointer sizes (like AIE's 20-bit pointers).
-  // Use TTI hook to determine if we should look through this trunc.
-  if (auto *Trunc = dyn_cast<TruncInst>(I)) {
-    if (TTI && TTI->shouldIVUsersLookThroughTrunc(Trunc)) {
-      LLVM_DEBUG(dbgs() << "Looking through trunc to GEP: " << *I << '\n');
-      bool AnyInteresting = false;
-      for (Use &U : I->uses()) {
-        auto *GEP = cast<GetElementPtrInst>(U.getUser());
-        // Recursively process the GEP result instead of the trunc
-        if (AddUsersIfInteresting(GEP))
-          AnyInteresting = true;
-      }
-      return AnyInteresting;
-    }
+  // Allow targets to look through certain instructions (e.g., truncs to index
+  // size on AIE) to collect their users instead. This enables LSR to create
+  // pointer PHIs for targets with non-native pointer sizes.
+  SmallVector<GetElementPtrInst *, 4> GEPsToProcess;
+  if (TTI && TTI->shouldIVUsersLookThroughInst(I, GEPsToProcess)) {
+    LLVM_DEBUG(dbgs() << "Looking through instruction: " << *I << '\n');
+    bool AnyInteresting = false;
+    for (GetElementPtrInst *GEP : GEPsToProcess)
+      if (AddUsersIfInteresting(GEP))
+        AnyInteresting = true;
+    return AnyInteresting;
   }
 
   SmallPtrSet<Instruction *, 4> UniqueUsers;

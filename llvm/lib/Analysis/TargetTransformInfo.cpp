@@ -474,9 +474,13 @@ TargetTransformInfo::getPreferredAddressingMode(const Loop *L,
   return TTIImpl->getPreferredAddressingMode(L, SE);
 }
 
-bool TargetTransformInfo::shouldIVUsersLookThroughTrunc(
-    TruncInst *Trunc) const {
-  return TTIImpl->shouldIVUsersLookThroughTrunc(Trunc);
+bool TargetTransformInfo::shouldIVUsersLookThroughInst(
+    Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const {
+  return TTIImpl->shouldIVUsersLookThroughInst(I, GEPsToProcess);
+}
+
+bool TargetTransformInfo::shouldLSRPreserveBasicRecurrence(Type *Ty) const {
+  return TTIImpl->shouldLSRPreserveBasicRecurrence(Ty);
 }
 
 bool TargetTransformInfo::isValidIVUserType(Type *Ty) const {

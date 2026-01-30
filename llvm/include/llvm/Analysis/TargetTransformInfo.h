@@ -67,6 +67,7 @@ class StoreInst;
 class SwitchInst;
 class TargetLibraryInfo;
 class TruncInst;
+class GetElementPtrInst;
 class Type;
 class VPIntrinsic;
 struct KnownBits;
@@ -799,13 +800,19 @@ public:
   AddressingModeKind getPreferredAddressingMode(const Loop *L,
                                                 ScalarEvolution *SE) const;
 
-  /// Return true if IVUsers should look through a trunc instruction to collect
-  /// the users of its result (typically GEPs) instead of the trunc itself.
-  /// This is useful for targets like AIE with non-native pointer sizes (e.g.,
-  /// 20-bit pointers with 32-bit integers) where truncs to the index size
-  /// are used before GEP indices. Looking through such truncs allows LSR to
-  /// create pointer PHIs instead of integer PHIs.
-  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const;
+  /// Return true if IVUsers should look through the instruction to collect
+  /// its users instead. If true, populates GEPsToProcess with the GEP
+  /// instructions that should be processed as IV users.
+  /// This is useful for targets with non-native pointer sizes (e.g., AIE with
+  /// 20-bit pointers) where truncs to index size feed GEP indices.
+  bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const;
+
+  /// Return true if LSR should preserve recurrences for this type in Basic
+  /// uses. Used by targets with non-native pointer sizes to preserve index
+  /// recurrences that feed GEPs.
+  bool shouldLSRPreserveBasicRecurrence(Type *Ty) const;
 
   /// Return true if the given type is valid for IV user collection.
   /// By default, only legal integer widths up to 64 bits are allowed.
@@ -2024,7 +2031,10 @@ public:
                           TargetLibraryInfo *LibInfo) = 0;
   virtual AddressingModeKind
     getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const = 0;
-  virtual bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const = 0;
+  virtual bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const = 0;
+  virtual bool shouldLSRPreserveBasicRecurrence(Type *Ty) const = 0;
   virtual bool isValidIVUserType(Type *Ty) const = 0;
   virtual bool isLegalMaskedStore(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType, Align Alignment) = 0;
@@ -2570,8 +2580,13 @@ public:
                                ScalarEvolution *SE) const override {
     return Impl.getPreferredAddressingMode(L, SE);
   }
-  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const override {
-    return Impl.shouldIVUsersLookThroughTrunc(Trunc);
+  bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const override {
+    return Impl.shouldIVUsersLookThroughInst(I, GEPsToProcess);
+  }
+  bool shouldLSRPreserveBasicRecurrence(Type *Ty) const override {
+    return Impl.shouldLSRPreserveBasicRecurrence(Ty);
   }
   bool isValidIVUserType(Type *Ty) const override {
     return Impl.isValidIVUserType(Ty);

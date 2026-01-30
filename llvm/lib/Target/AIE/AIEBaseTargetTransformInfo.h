@@ -135,35 +135,55 @@ public:
     return TTI::AMK_PostIndexed;
   }
 
-  /// AIE supports post-increment loads (VLD_pstm).
+  /// Override to enable post-increment load optimization for AIE.
+  ///
+  /// AIE has VLD_pstm instructions that combine load + pointer update into a
+  /// single operation. LSR uses this hook in mayUsePostIncMode() to decide
+  /// whether to preserve recurrence structures. We return true for:
+  /// - Pointer types: enables {base,+,stride} recurrences for pointer PHIs
+  /// - i20 integers: enables index recurrences that feed GEP indices
   bool isIndexedLoadLegal(TTI::MemIndexedMode Mode, Type *Ty,
                           const DataLayout &DL) const {
-    // Return true for post-increment mode when the type is either:
-    // 1. A pointer type (for preserving pointer recurrences), OR
-    // 2. An integer type matching the index size (i20 on AIE) - this enables
-    //    LSR to preserve index recurrences that feed into GEPs, similar to how
-    //    ARM/Hexagon handle i32 indices.
     if (Mode != TTI::MIM_PostInc)
       return false;
-    return Ty->isPointerTy() ||
-           (Ty->isIntegerTy() &&
-            Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0));
+
+    const bool IsPointer = Ty->isPointerTy();
+    const bool IsIndexSizedInt =
+        Ty->isIntegerTy() &&
+        Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
+
+    return IsPointer || IsIndexSizedInt;
   }
 
-  /// AIE supports post-increment stores (VST_pstm).
+  /// Override to enable post-increment store optimization for AIE.
+  /// See isIndexedLoadLegal for rationale. AIE has VST_pstm instructions.
   bool isIndexedStoreLegal(TTI::MemIndexedMode Mode, Type *Ty,
                            const DataLayout &DL) const {
-    // Same logic as isIndexedLoadLegal.
     if (Mode != TTI::MIM_PostInc)
       return false;
-    return Ty->isPointerTy() ||
-           (Ty->isIntegerTy() &&
-            Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0));
+
+    const bool IsPointer = Ty->isPointerTy();
+    const bool IsIndexSizedInt =
+        Ty->isIntegerTy() &&
+        Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
+
+    return IsPointer || IsIndexSizedInt;
   }
 
-  /// Look through truncs to index size that feed GEP indices.
-  /// This allows LSR to create pointer PHIs for 20-bit pointers.
-  bool shouldIVUsersLookThroughTrunc(TruncInst *Trunc) const {
+  /// Override to look through truncs to index size that feed GEP indices.
+  ///
+  /// AIE has 20-bit pointers but 32-bit integers. Array indexing generates:
+  ///   %idx = shl i32 %i, 2
+  ///   %trunc = trunc i32 %idx to i20
+  ///   %ptr = getelementptr ..., i20 %trunc
+  ///
+  /// Without this hook, IVUsers stops at the trunc (i20 not legal), collecting
+  /// integer SCEVs. With this hook, IVUsers continues to the GEP, collecting
+  /// pointer SCEVs that enable post-increment addressing.
+  bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const {
+    auto *Trunc = dyn_cast<TruncInst>(I);
     if (!Trunc)
       return false;
 
@@ -176,7 +196,30 @@ public:
     if (!IsTruncToIndexSize || !IsNonLegalIndexSize)
       return false;
 
-    return allUsesAreGEPIndices(Trunc);
+    if (!allUsesAreGEPIndices(Trunc))
+      return false;
+
+    // Collect all GEP users for processing
+    for (User *U : Trunc->users())
+      GEPsToProcess.push_back(cast<GetElementPtrInst>(U));
+
+    return true;
+  }
+
+  /// Override to preserve recurrences for i20 and pointer types in LSR.
+  ///
+  /// LSR's mayUsePostIncMode uses this to decide if Basic uses should preserve
+  /// recurrence structure. For AIE, we want this for i20 (GEP indices) and
+  /// pointers, enabling post-increment addressing patterns.
+  bool shouldLSRPreserveBasicRecurrence(Type *Ty) const {
+    const DataLayout &DL = BaseT::getDataLayout();
+    const unsigned IndexWidth = DL.getIndexSizeInBits(0);
+
+    const bool IsPointer = Ty->isPointerTy();
+    const bool IsIndexSizedInt =
+        Ty->isIntegerTy() && Ty->getIntegerBitWidth() == IndexWidth;
+
+    return IsPointer || IsIndexSizedInt;
   }
 
   /// Allow index-sized integers and pointers as valid IV user types.
