@@ -20,27 +20,39 @@
 target datalayout = "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32"
 target triple = "aie2p"
 
-; CHECK-LABEL: define void @outer_loop_trunc_gep(
-; CHECK: for.body8.preheader:
-; CHECK: br label %for.body8
-;
-; CHECK: for.body8:
-; Baseline: LSR creates i32 recurrence, truncates per iteration
-; CHECK: [[LSR_IV:%.*]] = phi i32 [ [[LSR_IV_NEXT:%.*]], %for.cond.cleanup17 ], [ 0, %for.body8.preheader ]
-; CHECK: [[I_H:%.*]] = phi i32
-; CHECK: [[TRUNC:%.*]] = trunc i32 [[LSR_IV]] to i20
-; CHECK: [[GEP:%.*]] = getelementptr inbounds bfloat, ptr %ifm_data, i20 [[TRUNC]]
-; CHECK: br label %for.body17
-;
-; CHECK: for.body17:
-; CHECK: br i1 {{.*}}, label %for.body17, label %for.cond.cleanup17
-;
-; CHECK: for.cond.cleanup17:
-; CHECK: [[INC_H:%.*]] = add i32 [[I_H]], 1
-; CHECK: [[LSR_IV_NEXT]] = add i32 [[LSR_IV]], %stride
-; CHECK: br i1 {{.*}}, label %for.body8, label %exit
+
 
 define void @outer_loop_trunc_gep(ptr noalias %ifm_data, ptr noalias %ofm_data, i32 %H, i32 %K, i32 %stride) {
+; CHECK-LABEL: define void @outer_loop_trunc_gep(
+; CHECK-SAME: ptr noalias [[IFM_DATA:%.*]], ptr noalias [[OFM_DATA:%.*]], i32 [[H:%.*]], i32 [[K:%.*]], i32 [[STRIDE:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*:]]
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt i32 [[H]], 0
+; CHECK-NEXT:    br i1 [[CMP]], label %[[FOR_BODY8_PREHEADER:.*]], label %[[EXIT:.*]]
+; CHECK:       [[FOR_BODY8_PREHEADER]]:
+; CHECK-NEXT:    [[TMP0:%.*]] = trunc i32 [[STRIDE]] to i20
+; CHECK-NEXT:    [[TMP1:%.*]] = shl i20 [[TMP0]], 1
+; CHECK-NEXT:    br label %[[FOR_BODY8:.*]]
+; CHECK:       [[FOR_BODY8]]:
+; CHECK-NEXT:    [[LSR_IV:%.*]] = phi ptr [ [[SCEVGEP:%.*]], %[[FOR_COND_CLEANUP17:.*]] ], [ [[IFM_DATA]], %[[FOR_BODY8_PREHEADER]] ]
+; CHECK-NEXT:    [[I_H:%.*]] = phi i32 [ 0, %[[FOR_BODY8_PREHEADER]] ], [ [[INC_H:%.*]], %[[FOR_COND_CLEANUP17]] ]
+; CHECK-NEXT:    br label %[[FOR_BODY17:.*]]
+; CHECK:       [[FOR_BODY17]]:
+; CHECK-NEXT:    [[I12:%.*]] = phi i32 [ 0, %[[FOR_BODY8]] ], [ [[INC12:%.*]], %[[FOR_BODY17]] ]
+; CHECK-NEXT:    [[VAL:%.*]] = load <32 x i16>, ptr [[LSR_IV]], align 64
+; CHECK-NEXT:    call void @use(<32 x i16> [[VAL]])
+; CHECK-NEXT:    [[INC12]] = add i32 [[I12]], 1
+; CHECK-NEXT:    [[CMP17:%.*]] = icmp slt i32 [[INC12]], [[K]]
+; CHECK-NEXT:    br i1 [[CMP17]], label %[[FOR_BODY17]], label %[[FOR_COND_CLEANUP17]]
+; CHECK:       [[FOR_COND_CLEANUP17]]:
+; CHECK-NEXT:    [[INC_H]] = add i32 [[I_H]], 1
+; CHECK-NEXT:    [[SCEVGEP]] = getelementptr i8, ptr [[LSR_IV]], i20 [[TMP1]]
+; CHECK-NEXT:    [[CMP8:%.*]] = icmp slt i32 [[INC_H]], [[H]]
+; CHECK-NEXT:    br i1 [[CMP8]], label %[[FOR_BODY8]], label %[[EXIT_LOOPEXIT:.*]]
+; CHECK:       [[EXIT_LOOPEXIT]]:
+; CHECK-NEXT:    br label %[[EXIT]]
+; CHECK:       [[EXIT]]:
+; CHECK-NEXT:    ret void
+;
 entry:
   %cmp = icmp sgt i32 %H, 0
   br i1 %cmp, label %for.body8.preheader, label %exit

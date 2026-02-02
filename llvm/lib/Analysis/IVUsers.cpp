@@ -71,7 +71,7 @@ static bool isInteresting(const SCEV *S, const Instruction *I, const Loop *L,
     // the step value is not interesting, since we don't yet know how to
     // do effective SCEV expansions for addrecs with interesting steps.
     return isInteresting(AR->getStart(), I, L, SE, LI) &&
-          !isInteresting(AR->getStepRecurrence(*SE), I, L, SE, LI);
+           !isInteresting(AR->getStepRecurrence(*SE), I, L, SE, LI);
   }
 
   // An add is interesting if exactly one of its operands is interesting.
@@ -137,16 +137,16 @@ static bool IVUseShouldUsePostIncValue(Instruction *User, Value *Operand,
 /// Inspect the specified instruction.  If it is a reducible SCEV, recursively
 /// add its users to the IVUsesByStride set and return true.  Otherwise, return
 /// false.
-bool IVUsers::AddUsersIfInteresting(Instruction *I) {
+bool IVUsers::AddUsersIfInteresting(Instruction *I, bool BypassWidthCheck) {
   const DataLayout &DL = I->getDataLayout();
 
   // Add this IV user to the Processed set before returning false to ensure that
   // all IV users are members of the set. See IVUsers::isIVUserOrOperand.
   if (!Processed.insert(I).second)
-    return true;    // Instruction already handled.
+    return true; // Instruction already handled.
 
   if (!SE->isSCEVable(I->getType()))
-    return false;   // Void and FP expressions cannot be reduced.
+    return false; // Void and FP expressions cannot be reduced.
 
   // IVUsers is used by LSR which assumes that all SCEV expressions are safe to
   // pass to SCEVExpander. Expressions are not safe to expand if they represent
@@ -159,11 +159,13 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
   // 64-bit IV in 32-bit code just because the loop has one 64-bit cast.
   // Use TTI hook if available to allow targets with non-native pointer sizes
   // (e.g., AIE with 20-bit pointers) to enable IV user collection.
-  const uint64_t Width = SE->getTypeSizeInBits(I->getType());
-  const bool IsValidType = TTI ? TTI->isValidIVUserType(I->getType())
-                               : (Width <= 64 && DL.isLegalInteger(Width));
-  if (!IsValidType)
-    return false;
+  if (!BypassWidthCheck) {
+    const uint64_t Width = SE->getTypeSizeInBits(I->getType());
+    const bool IsValidType = TTI ? TTI->isValidIVUserType(I->getType())
+                                 : (Width <= 64 && DL.isLegalInteger(Width));
+    if (!IsValidType)
+      return false;
+  }
 
   // Don't attempt to promote ephemeral values to indvars. They will be removed
   // later anyway.
@@ -186,7 +188,7 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
     LLVM_DEBUG(dbgs() << "Looking through instruction: " << *I << '\n');
     bool AnyInteresting = false;
     for (GetElementPtrInst *GEP : GEPsToProcess)
-      if (AddUsersIfInteresting(GEP))
+      if (AddUsersIfInteresting(GEP, /*BypassWidthCheck=*/true))
         AnyInteresting = true;
     return AnyInteresting;
   }
@@ -388,9 +390,7 @@ const SCEV *IVUsers::getStride(const IVStrideUse &IU, const Loop *L) const {
   return nullptr;
 }
 
-void IVStrideUse::transformToPostInc(const Loop *L) {
-  PostIncLoops.insert(L);
-}
+void IVStrideUse::transformToPostInc(const Loop *L) { PostIncLoops.insert(L); }
 
 void IVStrideUse::deleted() {
   // Remove this user from the list.

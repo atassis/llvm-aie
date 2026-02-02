@@ -152,7 +152,8 @@ public:
         Ty->isIntegerTy() &&
         Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
 
-    return IsPointer || IsIndexSizedInt;
+    return IsIndexSizedInt; // Only i20, not pointers - pointers handled by
+                            // Address uses
   }
 
   /// Override to enable post-increment store optimization for AIE.
@@ -167,7 +168,8 @@ public:
         Ty->isIntegerTy() &&
         Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
 
-    return IsPointer || IsIndexSizedInt;
+    return IsIndexSizedInt; // Only i20, not pointers - pointers handled by
+                            // Address uses
   }
 
   /// Override to look through truncs to index size that feed GEP indices.
@@ -219,7 +221,28 @@ public:
     const bool IsIndexSizedInt =
         Ty->isIntegerTy() && Ty->getIntegerBitWidth() == IndexWidth;
 
-    return IsPointer || IsIndexSizedInt;
+    return IsIndexSizedInt; // Only i20, not pointers - pointers handled by
+                            // Address uses
+  }
+
+  /// Override LSR cost comparison to prioritize fewer loop-body adds.
+  ///
+  /// The default isLSRCostLess prioritizes AddRecCost (number of unique
+  /// SCEVAddRecExprs) over NumBaseAdds (adds in loop body). For VLIW
+  /// architectures like AIE, extra adds in the loop body directly hurt
+  /// iteration interval (II), while extra PHIs (higher AddRecCost) are
+  /// relatively cheap since they execute in parallel.
+  ///
+  /// Example: For `sub 1, %i` with pointer GEP:
+  /// - Default picks {0,+,-1} + imm(1) (AddRecCost=1, BaseAdds=2, shares IV)
+  /// - We prefer {1,+,-1}             (AddRecCost=2, BaseAdds=1, one less add)
+  ///
+  /// Priority order (AArch64-style): NumRegs > NumBaseAdds > AddRecCost
+  bool isLSRCostLess(const TTI::LSRCost &C1, const TTI::LSRCost &C2) const {
+    return std::tie(C1.NumRegs, C1.Insns, C1.NumBaseAdds, C1.AddRecCost,
+                    C1.NumIVMuls, C1.ScaleCost, C1.ImmCost, C1.SetupCost) <
+           std::tie(C2.NumRegs, C2.Insns, C2.NumBaseAdds, C2.AddRecCost,
+                    C2.NumIVMuls, C2.ScaleCost, C2.ImmCost, C2.SetupCost);
   }
 
   /// Allow index-sized integers and pointers as valid IV user types.
@@ -233,7 +256,8 @@ public:
     const bool IsIndexSizedInteger = Ty->isIntegerTy() && Width == IndexWidth;
     const bool IsIndexSizedPointer = Ty->isPointerTy() && Width == IndexWidth;
 
-    return IsLegalInteger || IsIndexSizedInteger || IsIndexSizedPointer;
+    return IsLegalInteger ||
+           IsIndexSizedInteger; // i20 for GEP indices, not pointers
   }
 };
 

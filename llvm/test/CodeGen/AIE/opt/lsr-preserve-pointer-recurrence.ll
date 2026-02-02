@@ -84,13 +84,13 @@ define void @gep_chain_pattern(ptr %base, i20 %stride, i32 %n) {
 ; CHECK-NEXT:    [[I:%.*]] = phi i32 [ 0, %[[ENTRY]] ], [ [[I_NEXT:%.*]], %[[LOOP]] ]
 ; CHECK-NEXT:    [[AS0:%.*]] = addrspacecast ptr [[P]] to ptr addrspace(5)
 ; CHECK-NEXT:    [[V0:%.*]] = load <16 x i32>, ptr addrspace(5) [[AS0]], align 64
-; CHECK-NEXT:    [[P1:%.*]] = getelementptr i8, ptr [[P]], i20 [[STRIDE]]
+; CHECK-NEXT:    [[P1:%.*]] = getelementptr inbounds i8, ptr [[P]], i20 [[STRIDE]]
 ; CHECK-NEXT:    [[AS1:%.*]] = addrspacecast ptr [[P1]] to ptr addrspace(5)
 ; CHECK-NEXT:    [[V1:%.*]] = load <16 x i32>, ptr addrspace(5) [[AS1]], align 64
-; CHECK-NEXT:    [[P2:%.*]] = getelementptr i8, ptr [[P1]], i20 [[STRIDE]]
+; CHECK-NEXT:    [[P2:%.*]] = getelementptr inbounds i8, ptr [[P1]], i20 [[STRIDE]]
 ; CHECK-NEXT:    [[AS2:%.*]] = addrspacecast ptr [[P2]] to ptr addrspace(5)
 ; CHECK-NEXT:    [[V2:%.*]] = load <16 x i32>, ptr addrspace(5) [[AS2]], align 64
-; CHECK-NEXT:    [[P3]] = getelementptr i8, ptr [[P2]], i20 [[STRIDE]]
+; CHECK-NEXT:    [[P3]] = getelementptr inbounds i8, ptr [[P2]], i20 [[STRIDE]]
 ; CHECK-NEXT:    call void @consume(<16 x i32> [[V0]])
 ; CHECK-NEXT:    call void @consume(<16 x i32> [[V1]])
 ; CHECK-NEXT:    call void @consume(<16 x i32> [[V2]])
