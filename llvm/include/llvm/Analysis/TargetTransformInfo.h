@@ -805,9 +805,11 @@ public:
   /// instructions that should be processed as IV users.
   /// This is useful for targets with non-native pointer sizes (e.g., AIE with
   /// 20-bit pointers) where truncs to index size feed GEP indices.
+  /// The Loop, DominatorTree, and ScalarEvolution are provided so targets
+  /// can make context-aware decisions about when to enable this optimization.
   bool shouldIVUsersLookThroughInst(
-      Instruction *I,
-      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const;
+      Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess,
+      const Loop *L, DominatorTree *DT, ScalarEvolution *SE) const;
 
   /// Return true if LSR should preserve recurrences for this type in Basic
   /// uses. Used by targets with non-native pointer sizes to preserve index
@@ -2032,8 +2034,8 @@ public:
   virtual AddressingModeKind
     getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const = 0;
   virtual bool shouldIVUsersLookThroughInst(
-      Instruction *I,
-      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const = 0;
+      Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess,
+      const Loop *L, DominatorTree *DT, ScalarEvolution *SE) const = 0;
   virtual bool shouldLSRPreserveBasicRecurrence(Type *Ty) const = 0;
   virtual bool isValidIVUserType(Type *Ty) const = 0;
   virtual bool isLegalMaskedStore(Type *DataType, Align Alignment) = 0;
@@ -2581,9 +2583,9 @@ public:
     return Impl.getPreferredAddressingMode(L, SE);
   }
   bool shouldIVUsersLookThroughInst(
-      Instruction *I,
-      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const override {
-    return Impl.shouldIVUsersLookThroughInst(I, GEPsToProcess);
+      Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess,
+      const Loop *L, DominatorTree *DT, ScalarEvolution *SE) const override {
+    return Impl.shouldIVUsersLookThroughInst(I, GEPsToProcess, L, DT, SE);
   }
   bool shouldLSRPreserveBasicRecurrence(Type *Ty) const override {
     return Impl.shouldLSRPreserveBasicRecurrence(Ty);

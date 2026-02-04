@@ -182,9 +182,10 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I, bool BypassWidthCheck) {
 
   // Allow targets to look through certain instructions (e.g., truncs to index
   // size on AIE) to collect their users instead. This enables LSR to create
-  // pointer PHIs for targets with non-native pointer sizes.
+  // pointer PHIs for targets with non-native pointer sizes. The TTI hook
+  // receives loop analysis info so targets can make context-aware decisions.
   SmallVector<GetElementPtrInst *, 4> GEPsToProcess;
-  if (TTI && TTI->shouldIVUsersLookThroughInst(I, GEPsToProcess)) {
+  if (TTI && TTI->shouldIVUsersLookThroughInst(I, GEPsToProcess, L, DT, SE)) {
     LLVM_DEBUG(dbgs() << "Looking through instruction: " << *I << '\n');
     bool AnyInteresting = false;
     for (GetElementPtrInst *GEP : GEPsToProcess)

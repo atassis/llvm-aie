@@ -30,11 +30,11 @@ define void @outer_loop_trunc_gep(ptr noalias %ifm_data, ptr noalias %ofm_data, 
 ; CHECK-NEXT:    br i1 [[CMP]], label %[[FOR_BODY8_PREHEADER:.*]], label %[[EXIT:.*]]
 ; CHECK:       [[FOR_BODY8_PREHEADER]]:
 ; CHECK-NEXT:    [[TMP0:%.*]] = trunc i32 [[STRIDE]] to i20
-; CHECK-NEXT:    [[TMP1:%.*]] = shl i20 [[TMP0]], 1
 ; CHECK-NEXT:    br label %[[FOR_BODY8:.*]]
 ; CHECK:       [[FOR_BODY8]]:
-; CHECK-NEXT:    [[LSR_IV:%.*]] = phi ptr [ [[SCEVGEP:%.*]], %[[FOR_COND_CLEANUP17:.*]] ], [ [[IFM_DATA]], %[[FOR_BODY8_PREHEADER]] ]
+; CHECK-NEXT:    [[LSR_IV1:%.*]] = phi i20 [ [[LSR_IV_NEXT:%.*]], %[[FOR_COND_CLEANUP17:.*]] ], [ 0, %[[FOR_BODY8_PREHEADER]] ]
 ; CHECK-NEXT:    [[I_H:%.*]] = phi i32 [ 0, %[[FOR_BODY8_PREHEADER]] ], [ [[INC_H:%.*]], %[[FOR_COND_CLEANUP17]] ]
+; CHECK-NEXT:    [[LSR_IV:%.*]] = getelementptr inbounds bfloat, ptr [[IFM_DATA]], i20 [[LSR_IV1]]
 ; CHECK-NEXT:    br label %[[FOR_BODY17:.*]]
 ; CHECK:       [[FOR_BODY17]]:
 ; CHECK-NEXT:    [[I12:%.*]] = phi i32 [ 0, %[[FOR_BODY8]] ], [ [[INC12:%.*]], %[[FOR_BODY17]] ]
@@ -45,7 +45,7 @@ define void @outer_loop_trunc_gep(ptr noalias %ifm_data, ptr noalias %ofm_data, 
 ; CHECK-NEXT:    br i1 [[CMP17]], label %[[FOR_BODY17]], label %[[FOR_COND_CLEANUP17]]
 ; CHECK:       [[FOR_COND_CLEANUP17]]:
 ; CHECK-NEXT:    [[INC_H]] = add i32 [[I_H]], 1
-; CHECK-NEXT:    [[SCEVGEP]] = getelementptr i8, ptr [[LSR_IV]], i20 [[TMP1]]
+; CHECK-NEXT:    [[LSR_IV_NEXT]] = add i20 [[LSR_IV1]], [[TMP0]]
 ; CHECK-NEXT:    [[CMP8:%.*]] = icmp slt i32 [[INC_H]], [[H]]
 ; CHECK-NEXT:    br i1 [[CMP8]], label %[[FOR_BODY8]], label %[[EXIT_LOOPEXIT:.*]]
 ; CHECK:       [[EXIT_LOOPEXIT]]:

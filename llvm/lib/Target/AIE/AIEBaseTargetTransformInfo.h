@@ -19,8 +19,12 @@
 #define LLVM_LIB_TARGET_AIE_AIEBASETARGETTRANSFORMINFO_H
 
 #include "aie1/AIE1Subtarget.h" // For AIEBaseSubTarget
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
+#include "llvm/IR/Dominators.h"
 
 namespace llvm {
 /// This is just a bunch of shared methods that can be easily reused.
@@ -172,6 +176,47 @@ public:
                             // Address uses
   }
 
+  /// Check if any GEP is in a block that doesn't dominate the loop latch.
+  static bool anyGEPInNonDominatingBlock(ArrayRef<GetElementPtrInst *> GEPs,
+                                         const Loop *L, DominatorTree *DT) {
+    BasicBlock *Latch = L->getLoopLatch();
+    if (!Latch)
+      return true; // Conservative: skip if no single latch
+    for (const GetElementPtrInst *GEP : GEPs) {
+      if (!DT->dominates(GEP->getParent(), Latch))
+        return true;
+    }
+    return false;
+  }
+
+  /// Check if the SCEV contains an AddRec for a parent loop of L.
+  static bool containsParentLoopAddRec(const SCEV *S, const Loop *L) {
+    if (const auto *AR = dyn_cast<SCEVAddRecExpr>(S)) {
+      const Loop *ARLoop = AR->getLoop();
+      if (ARLoop != L && ARLoop->contains(L))
+        return true;
+      if (containsParentLoopAddRec(AR->getStart(), L))
+        return true;
+    }
+    if (const auto *NAry = dyn_cast<SCEVNAryExpr>(S)) {
+      for (const SCEV *Op : NAry->operands())
+        if (containsParentLoopAddRec(Op, L))
+          return true;
+    }
+    return false;
+  }
+
+  /// Check if any GEP's SCEV contains an AddRec for a parent loop.
+  static bool anyGEPHasParentLoopAddRec(ArrayRef<GetElementPtrInst *> GEPs,
+                                        const Loop *L, ScalarEvolution *SE) {
+    for (const GetElementPtrInst *GEP : GEPs) {
+      const SCEV *GEPScev = SE->getSCEV(const_cast<GetElementPtrInst *>(GEP));
+      if (containsParentLoopAddRec(GEPScev, L))
+        return true;
+    }
+    return false;
+  }
+
   /// Override to look through truncs to index size that feed GEP indices.
   ///
   /// AIE has 20-bit pointers but 32-bit integers. Array indexing generates:
@@ -182,9 +227,15 @@ public:
   /// Without this hook, IVUsers stops at the trunc (i20 not legal), collecting
   /// integer SCEVs. With this hook, IVUsers continues to the GEP, collecting
   /// pointer SCEVs that enable post-increment addressing.
+  ///
+  /// The hook also performs context-aware checks to avoid creating expensive
+  /// pointer recurrences in nested loop scenarios:
+  /// 1. Skip if any GEP doesn't dominate the loop latch (conditional paths)
+  /// 2. Skip if any GEP's SCEV contains an AddRec for a parent loop
+  /// 3. Skip if the current loop has nested sub-loops
   bool shouldIVUsersLookThroughInst(
-      Instruction *I,
-      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const {
+      Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess,
+      const Loop *L, DominatorTree *DT, ScalarEvolution *SE) const {
     auto *Trunc = dyn_cast<TruncInst>(I);
     if (!Trunc)
       return false;
@@ -204,6 +255,24 @@ public:
     // Collect all GEP users for processing
     for (User *U : Trunc->users())
       GEPsToProcess.push_back(cast<GetElementPtrInst>(U));
+
+    // Check 1: Skip if any GEP is in a block that doesn't dominate the loop
+    // latch. Creating pointer PHIs for such GEPs moves pointer updates from
+    // conditional blocks to the latch, causing unconditional expensive updates.
+    if (anyGEPInNonDominatingBlock(GEPsToProcess, L, DT))
+      return false;
+
+    // Check 2: Skip if any GEP's SCEV contains an AddRec for a parent loop.
+    // Creating pointer PHIs for such GEPs causes updates in the parent loop's
+    // latch, even when the current (child) loop wasn't executed.
+    if (anyGEPHasParentLoopAddRec(GEPsToProcess, L, SE))
+      return false;
+
+    // Check 3: Skip if the current loop has any nested loops.
+    // Creating pointer PHIs in loops with nested structure tends to introduce
+    // expensive pointer update overhead.
+    if (!L->getSubLoops().empty())
+      return false;
 
     return true;
   }

@@ -285,8 +285,8 @@ public:
 
   /// By default, do not look through instructions in IVUsers.
   bool shouldIVUsersLookThroughInst(
-      Instruction *I,
-      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const {
+      Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess,
+      const Loop *L, DominatorTree *DT, ScalarEvolution *SE) const {
     return false;
   }
 

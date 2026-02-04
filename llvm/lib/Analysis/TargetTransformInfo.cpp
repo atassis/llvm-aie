@@ -475,8 +475,9 @@ TargetTransformInfo::getPreferredAddressingMode(const Loop *L,
 }
 
 bool TargetTransformInfo::shouldIVUsersLookThroughInst(
-    Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const {
-  return TTIImpl->shouldIVUsersLookThroughInst(I, GEPsToProcess);
+    Instruction *I, SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess,
+    const Loop *L, DominatorTree *DT, ScalarEvolution *SE) const {
+  return TTIImpl->shouldIVUsersLookThroughInst(I, GEPsToProcess, L, DT, SE);
 }
 
 bool TargetTransformInfo::shouldLSRPreserveBasicRecurrence(Type *Ty) const {

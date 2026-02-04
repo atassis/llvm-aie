@@ -39,24 +39,26 @@ define void @nested_loop_non_dominating(ptr %base, i32 %outer_n, i32 %inner_n, i
 ; CHECK-NEXT:    [[TMP0:%.*]] = trunc i32 [[STRIDE]] to i20
 ; CHECK-NEXT:    br label %[[OUTER_HEADER:.*]]
 ; CHECK:       [[OUTER_HEADER]]:
-; CHECK-NEXT:    [[LSR_IV:%.*]] = phi ptr [ [[SCEVGEP:%.*]], %[[OUTER_LATCH:.*]] ], [ [[BASE]], %[[ENTRY]] ]
+; CHECK-NEXT:    [[LSR_IV1:%.*]] = phi i20 [ [[LSR_IV_NEXT2:%.*]], %[[OUTER_LATCH:.*]] ], [ 0, %[[ENTRY]] ]
 ; CHECK-NEXT:    [[OUTER_I:%.*]] = phi i32 [ 0, %[[ENTRY]] ], [ [[OUTER_NEXT:%.*]], %[[OUTER_LATCH]] ]
 ; CHECK-NEXT:    [[OUTER_CMP:%.*]] = icmp slt i32 [[OUTER_I]], [[OUTER_N]]
 ; CHECK-NEXT:    br i1 [[OUTER_CMP]], label %[[INNER_PREHEADER:.*]], label %[[EXIT:.*]]
 ; CHECK:       [[INNER_PREHEADER]]:
+; CHECK-NEXT:    [[OUTER_PTR:%.*]] = getelementptr i8, ptr [[BASE]], i20 [[LSR_IV1]]
 ; CHECK-NEXT:    br label %[[INNER_HEADER:.*]]
 ; CHECK:       [[INNER_HEADER]]:
-; CHECK-NEXT:    [[INNER_PTR:%.*]] = phi ptr [ [[SCEVGEP2:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV]], %[[INNER_PREHEADER]] ]
+; CHECK-NEXT:    [[LSR_IV:%.*]] = phi i20 [ [[LSR_IV_NEXT:%.*]], %[[INNER_HEADER]] ], [ 0, %[[INNER_PREHEADER]] ]
 ; CHECK-NEXT:    [[INNER_I:%.*]] = phi i32 [ 0, %[[INNER_PREHEADER]] ], [ [[INNER_NEXT:%.*]], %[[INNER_HEADER]] ]
+; CHECK-NEXT:    [[INNER_PTR:%.*]] = getelementptr i8, ptr [[OUTER_PTR]], i20 [[LSR_IV]]
 ; CHECK-NEXT:    [[VAL:%.*]] = load <32 x i16>, ptr [[INNER_PTR]], align 64
 ; CHECK-NEXT:    call void @consume(<32 x i16> [[VAL]])
 ; CHECK-NEXT:    [[INNER_NEXT]] = add i32 [[INNER_I]], 1
-; CHECK-NEXT:    [[SCEVGEP2]] = getelementptr i8, ptr [[INNER_PTR]], i20 64
+; CHECK-NEXT:    [[LSR_IV_NEXT]] = add i20 [[LSR_IV]], 64
 ; CHECK-NEXT:    [[INNER_CMP:%.*]] = icmp slt i32 [[INNER_NEXT]], [[INNER_N]]
 ; CHECK-NEXT:    br i1 [[INNER_CMP]], label %[[INNER_HEADER]], label %[[OUTER_LATCH]]
 ; CHECK:       [[OUTER_LATCH]]:
 ; CHECK-NEXT:    [[OUTER_NEXT]] = add i32 [[OUTER_I]], 1
-; CHECK-NEXT:    [[SCEVGEP]] = getelementptr i8, ptr [[LSR_IV]], i20 [[TMP0]]
+; CHECK-NEXT:    [[LSR_IV_NEXT2]] = add i20 [[LSR_IV1]], [[TMP0]]
 ; CHECK-NEXT:    br label %[[OUTER_HEADER]]
 ; CHECK:       [[EXIT]]:
 ; CHECK-NEXT:    ret void
@@ -111,34 +113,32 @@ define void @nested_loop_multiple_arrays(ptr %a, ptr %b, ptr %c, i32 %outer_n, i
 ; CHECK-NEXT:    [[TMP0:%.*]] = trunc i32 [[STRIDE]] to i20
 ; CHECK-NEXT:    br label %[[OUTER_HEADER:.*]]
 ; CHECK:       [[OUTER_HEADER]]:
-; CHECK-NEXT:    [[LSR_IV7:%.*]] = phi ptr [ [[SCEVGEP8:%.*]], %[[OUTER_LATCH:.*]] ], [ [[A]], %[[ENTRY]] ]
-; CHECK-NEXT:    [[LSR_IV3:%.*]] = phi ptr [ [[SCEVGEP4:%.*]], %[[OUTER_LATCH]] ], [ [[B]], %[[ENTRY]] ]
-; CHECK-NEXT:    [[LSR_IV:%.*]] = phi ptr [ [[SCEVGEP:%.*]], %[[OUTER_LATCH]] ], [ [[C]], %[[ENTRY]] ]
+; CHECK-NEXT:    [[LSR_IV1:%.*]] = phi i20 [ [[LSR_IV_NEXT2:%.*]], %[[OUTER_LATCH:.*]] ], [ 0, %[[ENTRY]] ]
 ; CHECK-NEXT:    [[OUTER_I:%.*]] = phi i32 [ 0, %[[ENTRY]] ], [ [[OUTER_NEXT:%.*]], %[[OUTER_LATCH]] ]
 ; CHECK-NEXT:    [[OUTER_CMP:%.*]] = icmp slt i32 [[OUTER_I]], [[OUTER_N]]
 ; CHECK-NEXT:    br i1 [[OUTER_CMP]], label %[[INNER_PREHEADER:.*]], label %[[EXIT:.*]]
 ; CHECK:       [[INNER_PREHEADER]]:
+; CHECK-NEXT:    [[PTR_A:%.*]] = getelementptr i8, ptr [[A]], i20 [[LSR_IV1]]
+; CHECK-NEXT:    [[PTR_B:%.*]] = getelementptr i8, ptr [[B]], i20 [[LSR_IV1]]
+; CHECK-NEXT:    [[PTR_C:%.*]] = getelementptr i8, ptr [[C]], i20 [[LSR_IV1]]
 ; CHECK-NEXT:    br label %[[INNER_HEADER:.*]]
 ; CHECK:       [[INNER_HEADER]]:
-; CHECK-NEXT:    [[INNER_A:%.*]] = phi ptr [ [[SCEVGEP10:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV7]], %[[INNER_PREHEADER]] ]
-; CHECK-NEXT:    [[INNER_B:%.*]] = phi ptr [ [[SCEVGEP6:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV3]], %[[INNER_PREHEADER]] ]
-; CHECK-NEXT:    [[INNER_C:%.*]] = phi ptr [ [[SCEVGEP2:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV]], %[[INNER_PREHEADER]] ]
+; CHECK-NEXT:    [[LSR_IV:%.*]] = phi i20 [ [[LSR_IV_NEXT:%.*]], %[[INNER_HEADER]] ], [ 0, %[[INNER_PREHEADER]] ]
 ; CHECK-NEXT:    [[INNER_I:%.*]] = phi i32 [ 0, %[[INNER_PREHEADER]] ], [ [[INNER_NEXT:%.*]], %[[INNER_HEADER]] ]
+; CHECK-NEXT:    [[INNER_A:%.*]] = getelementptr i8, ptr [[PTR_A]], i20 [[LSR_IV]]
+; CHECK-NEXT:    [[INNER_B:%.*]] = getelementptr i8, ptr [[PTR_B]], i20 [[LSR_IV]]
+; CHECK-NEXT:    [[INNER_C:%.*]] = getelementptr i8, ptr [[PTR_C]], i20 [[LSR_IV]]
 ; CHECK-NEXT:    [[VAL_A:%.*]] = load <32 x i16>, ptr [[INNER_A]], align 64
 ; CHECK-NEXT:    [[VAL_B:%.*]] = load <32 x i16>, ptr [[INNER_B]], align 64
 ; CHECK-NEXT:    [[SUM:%.*]] = add <32 x i16> [[VAL_A]], [[VAL_B]]
 ; CHECK-NEXT:    store <32 x i16> [[SUM]], ptr [[INNER_C]], align 64
 ; CHECK-NEXT:    [[INNER_NEXT]] = add i32 [[INNER_I]], 1
-; CHECK-NEXT:    [[SCEVGEP2]] = getelementptr i8, ptr [[INNER_C]], i20 64
-; CHECK-NEXT:    [[SCEVGEP6]] = getelementptr i8, ptr [[INNER_B]], i20 64
-; CHECK-NEXT:    [[SCEVGEP10]] = getelementptr i8, ptr [[INNER_A]], i20 64
+; CHECK-NEXT:    [[LSR_IV_NEXT]] = add i20 [[LSR_IV]], 64
 ; CHECK-NEXT:    [[INNER_CMP:%.*]] = icmp slt i32 [[INNER_NEXT]], [[INNER_N]]
 ; CHECK-NEXT:    br i1 [[INNER_CMP]], label %[[INNER_HEADER]], label %[[OUTER_LATCH]]
 ; CHECK:       [[OUTER_LATCH]]:
 ; CHECK-NEXT:    [[OUTER_NEXT]] = add i32 [[OUTER_I]], 1
-; CHECK-NEXT:    [[SCEVGEP]] = getelementptr i8, ptr [[LSR_IV]], i20 [[TMP0]]
-; CHECK-NEXT:    [[SCEVGEP4]] = getelementptr i8, ptr [[LSR_IV3]], i20 [[TMP0]]
-; CHECK-NEXT:    [[SCEVGEP8]] = getelementptr i8, ptr [[LSR_IV7]], i20 [[TMP0]]
+; CHECK-NEXT:    [[LSR_IV_NEXT2]] = add i20 [[LSR_IV1]], [[TMP0]]
 ; CHECK-NEXT:    br label %[[OUTER_HEADER]]
 ; CHECK:       [[EXIT]]:
 ; CHECK-NEXT:    ret void
