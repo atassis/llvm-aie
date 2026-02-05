@@ -15,7 +15,10 @@
 ; - Outer loop (for.body8) computes: mul -> trunc to i20 -> GEP
 ; - Inner loop (for.body17) uses the GEP result
 ;
-; Baseline behavior: LSR creates an i32 recurrence and truncates per iteration.
+; LSR creates an i20 recurrence for the outer loop since i20 is a valid IV
+; type for AIE (via isValidIVUserType TTI hook). This is acceptable as long
+; as the shouldIVUsersLookThroughInst hook doesn't also trigger for the outer
+; loop (which has subloops), which would cause additional expensive operations.
 
 target datalayout = "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32"
 target triple = "aie2p"
