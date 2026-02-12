@@ -151,13 +151,9 @@ public:
     if (Mode != TTI::MIM_PostInc)
       return false;
 
-    const bool IsPointer = Ty->isPointerTy();
-    const bool IsIndexSizedInt =
-        Ty->isIntegerTy() &&
-        Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
-
-    return IsIndexSizedInt; // Only i20, not pointers - pointers handled by
-                            // Address uses
+    // Only i20 integers, not pointers - pointers handled by Address uses
+    return Ty->isIntegerTy() &&
+           Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
   }
 
   /// Override to enable post-increment store optimization for AIE.
@@ -167,13 +163,9 @@ public:
     if (Mode != TTI::MIM_PostInc)
       return false;
 
-    const bool IsPointer = Ty->isPointerTy();
-    const bool IsIndexSizedInt =
-        Ty->isIntegerTy() &&
-        Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
-
-    return IsIndexSizedInt; // Only i20, not pointers - pointers handled by
-                            // Address uses
+    // Only i20 integers, not pointers - pointers handled by Address uses
+    return Ty->isIntegerTy() &&
+           Ty->getIntegerBitWidth() == DL.getIndexSizeInBits(0);
   }
 
   /// Check if any GEP is in a block that doesn't dominate the loop latch.
@@ -286,12 +278,8 @@ public:
     const DataLayout &DL = BaseT::getDataLayout();
     const unsigned IndexWidth = DL.getIndexSizeInBits(0);
 
-    const bool IsPointer = Ty->isPointerTy();
-    const bool IsIndexSizedInt =
-        Ty->isIntegerTy() && Ty->getIntegerBitWidth() == IndexWidth;
-
-    return IsIndexSizedInt; // Only i20, not pointers - pointers handled by
-                            // Address uses
+    // Only i20 integers, not pointers - pointers handled by Address uses
+    return Ty->isIntegerTy() && Ty->getIntegerBitWidth() == IndexWidth;
   }
 
   /// Override LSR cost comparison to prioritize fewer loop-body adds.
@@ -314,7 +302,8 @@ public:
                     C2.NumIVMuls, C2.ScaleCost, C2.ImmCost, C2.SetupCost);
   }
 
-  /// Allow index-sized integers and pointers as valid IV user types.
+  /// Allow index-sized integers as valid IV user types.
+  /// i20 for GEP indices; pointers are handled separately by Address uses.
   bool isValidIVUserType(Type *Ty) const {
     const DataLayout &DL = BaseT::getDataLayout();
     const uint64_t Width = DL.getTypeSizeInBits(Ty);
@@ -323,10 +312,8 @@ public:
     const bool IsLegalInteger =
         Ty->isIntegerTy() && Width <= 64 && DL.isLegalInteger(Width);
     const bool IsIndexSizedInteger = Ty->isIntegerTy() && Width == IndexWidth;
-    const bool IsIndexSizedPointer = Ty->isPointerTy() && Width == IndexWidth;
 
-    return IsLegalInteger ||
-           IsIndexSizedInteger; // i20 for GEP indices, not pointers
+    return IsLegalInteger || IsIndexSizedInteger;
   }
 };
 

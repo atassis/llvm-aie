@@ -293,12 +293,11 @@ public:
   /// By default, do not preserve basic recurrences for non-standard types.
   bool shouldLSRPreserveBasicRecurrence(Type *Ty) const { return false; }
 
-  /// By default, only legal integer widths up to 64 bits are valid for IV
-  /// users.
+  /// By default, match original IVUsers logic: allow types with size <= 64 bits
+  /// where the width is a legal integer size. This accepts both integers and
+  /// pointers on typical targets (e.g., 64-bit pointers on x86-64).
   bool isValidIVUserType(Type *Ty) const {
-    if (!Ty->isIntegerTy())
-      return false;
-    unsigned Width = Ty->getIntegerBitWidth();
+    uint64_t Width = DL.getTypeSizeInBits(Ty);
     return Width <= 64 && DL.isLegalInteger(Width);
   }
 
