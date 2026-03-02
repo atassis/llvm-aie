@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// (c) Copyright 2023-2025 Advanced Micro Devices, Inc. or its affiliates
+// (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its affiliates
 //
 //===----------------------------------------------------------------------===//
 //
@@ -198,6 +198,13 @@ private:
                         std::optional<ValueAndVReg> OffsetA,
                         std::optional<ValueAndVReg> OffsetB);
 
+  // Insert G_PTR_ADD with zero offset for load/store instructions that
+  // directly use a pointer register which also has G_PTR_ADD users.
+  // This ensures bare offset-0 accesses participate in post-increment
+  // chaining built by buildChain.
+  bool insertPtrAddForBareMemOps(MachineBasicBlock &MBB, MachineIRBuilder &MIB,
+                                 GISelObserverWrapper &Observer);
+
   // Return true if the instructions are used by both loads and stores.
   bool hasMixedLoadStoreUse(SmallVector<MachineInstr *, 2> Instrs);
 
@@ -263,6 +270,8 @@ bool AIEClusterBaseAddress::processBasicBlock(MachineBasicBlock &MBB,
 
   bool Changed = false;
 
+  Changed |= insertPtrAddForBareMemOps(MBB, MIB, Observer);
+
   // Get all G_PTR_ADDs that use the same pointer.
   RegUseMap RegAndUses = collectPtrUses(MBB);
 
@@ -288,6 +297,86 @@ bool AIEClusterBaseAddress::processBasicBlock(MachineBasicBlock &MBB,
     // Build chain, breaking it (or restarting it) when necessary
     Changed |= buildChain(Instrs, MBB, MIB, Observer);
   }
+  return Changed;
+}
+
+bool AIEClusterBaseAddress::insertPtrAddForBareMemOps(
+    MachineBasicBlock &MBB, MachineIRBuilder &MIB,
+    GISelObserverWrapper &Observer) {
+  bool Changed = false;
+
+  for (MachineInstr &PHI : MBB) {
+    if (!PHI.isPHI())
+      return Changed;
+
+    const Register PhiReg = PHI.getOperand(0).getReg();
+    const bool IsPointerPhi = MRI->getType(PhiReg).isPointer();
+    if (!IsPointerPhi)
+      continue;
+
+    // Single walk over the MBB in program order to collect:
+    // - PtrAddFeedingMemOpCount: G_PTR_ADDs from this PHI that feed mem ops
+    // - BareMemOps: load/store instructions that use the PHI directly
+    // - Whether each bare mem op precedes the first such G_PTR_ADD
+    unsigned PtrAddFeedingMemOpCount = 0;
+    SmallVector<std::pair<MachineInstr *, bool>, 4> BareMemOps;
+
+    for (MachineInstr &MI : MBB) {
+      if (MI.isPHI())
+        continue;
+
+      const bool UsesPhiAsBase = MI.getNumOperands() > 1 &&
+                                 MI.getOperand(1).isReg() &&
+                                 MI.getOperand(1).getReg() == PhiReg;
+      if (!UsesPhiAsBase)
+        continue;
+
+      const bool IsPtrAdd = MI.getOpcode() == TargetOpcode::G_PTR_ADD;
+      if (IsPtrAdd) {
+        const bool FeedsMemOp =
+            any_of(MRI->use_nodbg_instructions(MI.getOperand(0).getReg()),
+                   [](const MachineInstr &U) { return U.mayLoadOrStore(); });
+        if (FeedsMemOp)
+          PtrAddFeedingMemOpCount++;
+        continue;
+      }
+
+      const bool IsBareMemOp =
+          MI.mayLoadOrStore() && MI.getNumMemOperands() > 0;
+      if (IsBareMemOp) {
+        const bool PrecedesChain = PtrAddFeedingMemOpCount == 0;
+        BareMemOps.push_back({&MI, PrecedesChain});
+      }
+    }
+
+    // We need at least 2 PTR_ADDs feeding memory ops to form a chain.
+    // With only 1, the inserted PTR_ADD +0 has no chain partner and
+    // survives as a redundant padda #0.
+    if (PtrAddFeedingMemOpCount < 2 || BareMemOps.empty())
+      continue;
+
+    for (auto &[MemOp, PrecedesChain] : BareMemOps) {
+      // Skip insertion if the bare mem op precedes all G_PTR_ADDs from
+      // this PHI that feed memory ops. Such a mem op is the "first" user
+      // of the PHI pointer and can be combined with a post-increment
+      // update (e.g., add.2d/add.3d) into a single post-increment load.
+      // Inserting G_PTR_ADD +0 would break this combination.
+      if (PrecedesChain)
+        continue;
+
+      const unsigned AddrIdx = 1;
+      MIB.setInsertPt(MBB, MemOp->getIterator());
+      const auto ZeroOffset = MIB.buildConstant(LLT::scalar(20), 0);
+      const auto NewPtr =
+          MIB.buildInstr(TargetOpcode::G_PTR_ADD, {MRI->getType(PhiReg)},
+                         {PhiReg, ZeroOffset.getReg(0)});
+      Observer.changingInstr(*MemOp);
+      MemOp->getOperand(AddrIdx).setReg(NewPtr.getReg(0));
+      Observer.changedInstr(*MemOp);
+      Changed = true;
+    }
+  }
+
   return Changed;
 }
 
