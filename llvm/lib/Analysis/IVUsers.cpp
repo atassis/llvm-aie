@@ -4,6 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Modifications (c) Copyright 2026 Advanced Micro Devices, Inc. or its
+// affiliates
+//
 //===----------------------------------------------------------------------===//
 //
 // This file implements bookkeeping for "interesting" users of expressions
@@ -18,6 +21,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DataLayout.h"
@@ -35,7 +39,7 @@ AnalysisKey IVUsersAnalysis::Key;
 
 IVUsers IVUsersAnalysis::run(Loop &L, LoopAnalysisManager &AM,
                              LoopStandardAnalysisResults &AR) {
-  return IVUsers(&L, &AR.AC, &AR.LI, &AR.DT, &AR.SE);
+  return IVUsers(&L, &AR.AC, &AR.LI, &AR.DT, &AR.SE, &AR.TTI);
 }
 
 char IVUsersWrapperPass::ID = 0;
@@ -133,7 +137,7 @@ static bool IVUseShouldUsePostIncValue(Instruction *User, Value *Operand,
 /// Inspect the specified instruction.  If it is a reducible SCEV, recursively
 /// add its users to the IVUsesByStride set and return true.  Otherwise, return
 /// false.
-bool IVUsers::AddUsersIfInteresting(Instruction *I) {
+bool IVUsers::AddUsersIfInteresting(Instruction *I, bool BypassWidthCheck) {
   const DataLayout &DL = I->getDataLayout();
 
   // Add this IV user to the Processed set before returning false to ensure that
@@ -153,9 +157,16 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
   // LSR is not APInt clean, do not touch integers bigger than 64-bits.
   // Also avoid creating IVs of non-native types. For example, we don't want a
   // 64-bit IV in 32-bit code just because the loop has one 64-bit cast.
-  uint64_t Width = SE->getTypeSizeInBits(I->getType());
-  if (Width > 64 || !DL.isLegalInteger(Width))
-    return false;
+  // Use TTI hook if available to allow targets where pointer and integer bit
+  // sizes differ (e.g., 20-bit pointers with 32-bit integers) to enable IV
+  // user collection for index-sized types.
+  if (!BypassWidthCheck) {
+    const uint64_t Width = SE->getTypeSizeInBits(I->getType());
+    const bool IsValidType = TTI ? TTI->isValidIVUserType(I->getType())
+                                 : (Width <= 64 && DL.isLegalInteger(Width));
+    if (!IsValidType)
+      return false;
+  }
 
   // Don't attempt to promote ephemeral values to indvars. They will be removed
   // later anyway.
@@ -169,6 +180,18 @@ bool IVUsers::AddUsersIfInteresting(Instruction *I) {
   // call this a user.
   if (!isInteresting(ISE, I, L, SE, LI))
     return false;
+
+  // Allow targets to look through certain instructions (e.g., truncs to index
+  // size on targets where pointer and integer bit sizes differ) to collect
+  // their users instead. This enables LSR to create pointer PHIs.
+  SmallVector<GetElementPtrInst *, 4> GEPsToProcess;
+  if (TTI && TTI->shouldIVUsersLookThroughInst(I, GEPsToProcess)) {
+    LLVM_DEBUG(dbgs() << "Looking through instruction: " << *I << '\n');
+    bool AnyInteresting = false;
+    for (GetElementPtrInst *GEP : GEPsToProcess)
+      AnyInteresting |= AddUsersIfInteresting(GEP, /*BypassWidthCheck=*/true);
+    return AnyInteresting;
+  }
 
   SmallPtrSet<Instruction *, 4> UniqueUsers;
   for (Use &U : I->uses()) {
@@ -249,8 +272,8 @@ IVStrideUse &IVUsers::AddUser(Instruction *User, Value *Operand) {
 }
 
 IVUsers::IVUsers(Loop *L, AssumptionCache *AC, LoopInfo *LI, DominatorTree *DT,
-                 ScalarEvolution *SE)
-    : L(L), AC(AC), LI(LI), DT(DT), SE(SE) {
+                 ScalarEvolution *SE, const TargetTransformInfo *TTI)
+    : L(L), AC(AC), LI(LI), DT(DT), SE(SE), TTI(TTI) {
   // Collect ephemeral values so that AddUsersIfInteresting skips them.
   EphValues.clear();
   CodeMetrics::collectEphemeralValues(L, AC, EphValues);
@@ -306,6 +329,7 @@ void IVUsersWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addRequired<ScalarEvolutionWrapperPass>();
+  AU.addRequired<TargetTransformInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
@@ -315,8 +339,10 @@ bool IVUsersWrapperPass::runOnLoop(Loop *L, LPPassManager &LPM) {
   auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   auto *DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto *SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  auto *TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
+      *L->getHeader()->getParent());
 
-  IU.reset(new IVUsers(L, AC, LI, DT, SE));
+  IU.reset(new IVUsers(L, AC, LI, DT, SE, TTI));
   return false;
 }
 

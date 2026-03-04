@@ -9,27 +9,24 @@
 ; RUN: opt -mtriple=aie2p -passes='print<iv-users>' -disable-output %s 2>&1 | FileCheck %s --check-prefix=IVUSERS
 ; RUN: opt -mtriple=aie2p -passes=loop-reduce -S %s | FileCheck %s --check-prefix=LSR
 
-; This test verifies that LSR correctly handles i20 scalar recurrences on AIE.
-; The pattern is derived from a post_process kernel where:
-; - Loop counter is i32
-; - Array indices are computed as (4 * i + offset) and truncated to i20
-; - Multiple loads/stores at offsets 0, 1, 2, 3 from the scaled index
+; This test verifies that LSR looks through truncs to collect GEP results as
+; IV users on AIE. The pattern is derived from a post_process kernel where:
+; - Array indices are computed as trunc(4 * i + offset) to i20
+; - GEPs use these i20 indices with large element types (<32 x float>)
 ;
-; LSR should:
-; 1. Recognize i20 truncated indices as IV users (for potential optimization)
-; 2. NOT rewrite pointer recurrences (preserve GEP structure for post-increment)
-; 3. Allow the loop to use native i20 addressing
+; With the IVUsers fix to look through truncs, LSR now:
+; 1. Collects GEP results (not trunc results) as IV users
+; 2. Gets pointer-typed SCEVs like {%src,+,512} instead of i20 {0,+,4}
+; 3. Creates pointer PHIs with byte-indexed GEPs for post-increment
 
 target datalayout = "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-a:0:32-n32"
 target triple = "aie2p"
 
-; Check that i20 indices are collected as IV users
+; Check that GEP results (pointers) are collected as IV users
 ; IVUSERS: IV Users for loop %for.body with backedge-taken count
-; IVUSERS: %idx{{[0-3]}} = {{{[0-3]}},+,4}<%for.body>
+; IVUSERS: %ptr0 = {%src,+,512}<%for.body>
 
-; Check that LSR creates an i20 recurrence for native addressing
-; The key optimization: instead of computing trunc(4*i + offset) each time,
-; LSR creates an i20 PHI that increments by 4 directly.
+; LSR should create pointer PHIs with byte strides
 
 define void @post_process_pattern(ptr nocapture %src, i32 noundef %len) {
 ; LSR-LABEL: define void @post_process_pattern(
@@ -38,41 +35,37 @@ define void @post_process_pattern(ptr nocapture %src, i32 noundef %len) {
 ; LSR-NEXT:    [[DIV:%.*]] = lshr i32 [[LEN]], 7
 ; LSR-NEXT:    [[CMP:%.*]] = icmp sgt i32 [[LEN]], 511
 ; LSR-NEXT:    tail call void @llvm.assume(i1 [[CMP]])
-; LSR-NEXT:    [[TMP0:%.*]] = shl nuw nsw i32 [[DIV]], 2
+; LSR-NEXT:    [[SCEVGEP:%.*]] = getelementptr i8, ptr [[SRC]], i20 128
+; LSR-NEXT:    [[SCEVGEP6:%.*]] = getelementptr i8, ptr [[SRC]], i20 256
 ; LSR-NEXT:    br label %[[FOR_BODY:.*]]
 ; LSR:       [[FOR_COND_CLEANUP:.*]]:
 ; LSR-NEXT:    ret void
 ; LSR:       [[FOR_BODY]]:
-; LSR-NEXT:    [[LSR_IV:%.*]] = phi i32 [ [[LSR_IV_NEXT:%.*]], %[[FOR_BODY]] ], [ 0, %[[ENTRY]] ]
-; LSR-NEXT:    [[IDX0:%.*]] = trunc i32 [[LSR_IV]] to i20
-; LSR-NEXT:    [[PTR0:%.*]] = getelementptr inbounds <32 x float>, ptr [[SRC]], i20 [[IDX0]]
-; LSR-NEXT:    [[V0:%.*]] = load <32 x float>, ptr [[PTR0]], align 64
+; LSR-NEXT:    [[LSR_IV7:%.*]] = phi ptr [ [[SCEVGEP8:%.*]], %[[FOR_BODY]] ], [ [[SCEVGEP6]], %[[ENTRY]] ]
+; LSR-NEXT:    [[LSR_IV1:%.*]] = phi ptr [ [[SCEVGEP2:%.*]], %[[FOR_BODY]] ], [ [[SCEVGEP]], %[[ENTRY]] ]
+; LSR-NEXT:    [[LSR_IV:%.*]] = phi i32 [ [[LSR_IV_NEXT:%.*]], %[[FOR_BODY]] ], [ [[DIV]], %[[ENTRY]] ]
+; LSR-NEXT:    [[SCEVGEP10:%.*]] = getelementptr i8, ptr [[LSR_IV7]], i20 -256
+; LSR-NEXT:    [[V0:%.*]] = load <32 x float>, ptr [[SCEVGEP10]], align 64
 ; LSR-NEXT:    [[R0:%.*]] = tail call <32 x bfloat> @llvm.aie2p.v32accfloat.to.v32bf16(<32 x float> [[V0]])
-; LSR-NEXT:    [[DST0:%.*]] = getelementptr inbounds <32 x bfloat>, ptr [[SRC]], i20 [[IDX0]]
-; LSR-NEXT:    store <32 x bfloat> [[R0]], ptr [[DST0]], align 64
-; LSR-NEXT:    [[TMP1:%.*]] = add i32 [[LSR_IV]], 1
-; LSR-NEXT:    [[IDX1:%.*]] = trunc i32 [[TMP1]] to i20
-; LSR-NEXT:    [[PTR1:%.*]] = getelementptr inbounds <32 x float>, ptr [[SRC]], i20 [[IDX1]]
-; LSR-NEXT:    [[V1:%.*]] = load <32 x float>, ptr [[PTR1]], align 64
+; LSR-NEXT:    [[SCEVGEP3:%.*]] = getelementptr i8, ptr [[LSR_IV1]], i20 -128
+; LSR-NEXT:    store <32 x bfloat> [[R0]], ptr [[SCEVGEP3]], align 64
+; LSR-NEXT:    [[SCEVGEP11:%.*]] = getelementptr i8, ptr [[LSR_IV7]], i20 -128
+; LSR-NEXT:    [[V1:%.*]] = load <32 x float>, ptr [[SCEVGEP11]], align 64
 ; LSR-NEXT:    [[R1:%.*]] = tail call <32 x bfloat> @llvm.aie2p.v32accfloat.to.v32bf16(<32 x float> [[V1]])
-; LSR-NEXT:    [[DST1:%.*]] = getelementptr inbounds <32 x bfloat>, ptr [[SRC]], i20 [[IDX1]]
-; LSR-NEXT:    store <32 x bfloat> [[R1]], ptr [[DST1]], align 64
-; LSR-NEXT:    [[TMP2:%.*]] = add i32 [[LSR_IV]], 2
-; LSR-NEXT:    [[IDX2:%.*]] = trunc i32 [[TMP2]] to i20
-; LSR-NEXT:    [[PTR2:%.*]] = getelementptr inbounds <32 x float>, ptr [[SRC]], i20 [[IDX2]]
-; LSR-NEXT:    [[V2:%.*]] = load <32 x float>, ptr [[PTR2]], align 64
+; LSR-NEXT:    [[SCEVGEP5:%.*]] = getelementptr i8, ptr [[LSR_IV1]], i20 -64
+; LSR-NEXT:    store <32 x bfloat> [[R1]], ptr [[SCEVGEP5]], align 64
+; LSR-NEXT:    [[V2:%.*]] = load <32 x float>, ptr [[LSR_IV7]], align 64
 ; LSR-NEXT:    [[R2:%.*]] = tail call <32 x bfloat> @llvm.aie2p.v32accfloat.to.v32bf16(<32 x float> [[V2]])
-; LSR-NEXT:    [[DST2:%.*]] = getelementptr inbounds <32 x bfloat>, ptr [[SRC]], i20 [[IDX2]]
-; LSR-NEXT:    store <32 x bfloat> [[R2]], ptr [[DST2]], align 64
-; LSR-NEXT:    [[TMP3:%.*]] = add i32 [[LSR_IV]], 3
-; LSR-NEXT:    [[IDX3:%.*]] = trunc i32 [[TMP3]] to i20
-; LSR-NEXT:    [[PTR3:%.*]] = getelementptr inbounds <32 x float>, ptr [[SRC]], i20 [[IDX3]]
-; LSR-NEXT:    [[V3:%.*]] = load <32 x float>, ptr [[PTR3]], align 64
+; LSR-NEXT:    store <32 x bfloat> [[R2]], ptr [[LSR_IV1]], align 64
+; LSR-NEXT:    [[SCEVGEP9:%.*]] = getelementptr i8, ptr [[LSR_IV7]], i20 128
+; LSR-NEXT:    [[V3:%.*]] = load <32 x float>, ptr [[SCEVGEP9]], align 64
 ; LSR-NEXT:    [[R3:%.*]] = tail call <32 x bfloat> @llvm.aie2p.v32accfloat.to.v32bf16(<32 x float> [[V3]])
-; LSR-NEXT:    [[DST3:%.*]] = getelementptr inbounds <32 x bfloat>, ptr [[SRC]], i20 [[IDX3]]
-; LSR-NEXT:    store <32 x bfloat> [[R3]], ptr [[DST3]], align 64
-; LSR-NEXT:    [[LSR_IV_NEXT]] = add nuw nsw i32 [[LSR_IV]], 4
-; LSR-NEXT:    [[EXITCOND:%.*]] = icmp eq i32 [[TMP0]], [[LSR_IV_NEXT]]
+; LSR-NEXT:    [[SCEVGEP4:%.*]] = getelementptr i8, ptr [[LSR_IV1]], i20 64
+; LSR-NEXT:    store <32 x bfloat> [[R3]], ptr [[SCEVGEP4]], align 64
+; LSR-NEXT:    [[LSR_IV_NEXT]] = add nsw i32 [[LSR_IV]], -1
+; LSR-NEXT:    [[SCEVGEP2]] = getelementptr i8, ptr [[LSR_IV1]], i20 256
+; LSR-NEXT:    [[SCEVGEP8]] = getelementptr i8, ptr [[LSR_IV7]], i20 512
+; LSR-NEXT:    [[EXITCOND:%.*]] = icmp eq i32 [[LSR_IV_NEXT]], 0
 ; LSR-NEXT:    br i1 [[EXITCOND]], label %[[FOR_COND_CLEANUP]], label %[[FOR_BODY]], !llvm.loop [[LOOP0:![0-9]+]]
 ;
 entry:

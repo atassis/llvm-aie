@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Modifications (c) Copyright 2023-2024 Advanced Micro Devices, Inc. or its
+// Modifications (c) Copyright 2023-2026 Advanced Micro Devices, Inc. or its
 // affiliates
 //
 //===----------------------------------------------------------------------===//
@@ -66,6 +66,8 @@ class SmallBitVector;
 class StoreInst;
 class SwitchInst;
 class TargetLibraryInfo;
+class TruncInst;
+class GetElementPtrInst;
 class Type;
 class VPIntrinsic;
 struct KnownBits;
@@ -797,6 +799,22 @@ public:
   /// Return the preferred addressing mode LSR should make efforts to generate.
   AddressingModeKind getPreferredAddressingMode(const Loop *L,
                                                 ScalarEvolution *SE) const;
+
+  /// Return true if IVUsers() should look through the instruction to collect
+  /// its users instead. If true, populates GEPsToProcess with the GEP
+  /// instructions to process as IV users.
+  /// This is useful for targets where pointer and integer bit sizes differ
+  /// (e.g., 20-bit pointers with 32-bit integers), causing truncs to index
+  /// size that feed GEP indices.
+  bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const;
+
+  /// Return true if the given type is valid for IV user collection.
+  /// By default, only legal integer widths up to 64 bits are allowed.
+  /// Targets where pointer and integer bit sizes differ may override this
+  /// to allow index-sized integers or pointers.
+  bool isValidIVUserType(Type *Ty) const;
 
   /// Return true if the target supports masked store.
   bool isLegalMaskedStore(Type *DataType, Align Alignment) const;
@@ -2009,6 +2027,10 @@ public:
                           TargetLibraryInfo *LibInfo) = 0;
   virtual AddressingModeKind
     getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const = 0;
+  virtual bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const = 0;
+  virtual bool isValidIVUserType(Type *Ty) const = 0;
   virtual bool isLegalMaskedStore(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalNTStore(Type *DataType, Align Alignment) = 0;
@@ -2552,6 +2574,14 @@ public:
     getPreferredAddressingMode(const Loop *L,
                                ScalarEvolution *SE) const override {
     return Impl.getPreferredAddressingMode(L, SE);
+  }
+  bool shouldIVUsersLookThroughInst(
+      Instruction *I,
+      SmallVectorImpl<GetElementPtrInst *> &GEPsToProcess) const override {
+    return Impl.shouldIVUsersLookThroughInst(I, GEPsToProcess);
+  }
+  bool isValidIVUserType(Type *Ty) const override {
+    return Impl.isValidIVUserType(Ty);
   }
   bool isLegalMaskedStore(Type *DataType, Align Alignment) override {
     return Impl.isLegalMaskedStore(DataType, Alignment);

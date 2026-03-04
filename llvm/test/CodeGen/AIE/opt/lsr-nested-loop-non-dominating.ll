@@ -31,13 +31,36 @@ target triple = "aie2p"
 ; The inner loop should use scalar i20 recurrence + indexed addressing,
 ; not pointer recurrence which would require expensive updates in outer latch.
 ;
-; CHECK-LABEL: define void @nested_loop_non_dominating
-; CHECK: inner_header:
-; CHECK: [[IV:%.*]] = phi i20
-; CHECK: [[PTR:%.*]] = getelementptr i8, ptr {{%.*}}, i20 [[IV]]
-; CHECK: load <32 x i16>, ptr [[PTR]]
-; CHECK: add i20 [[IV]], 64
 define void @nested_loop_non_dominating(ptr %base, i32 %outer_n, i32 %inner_n, i32 %stride) {
+; CHECK-LABEL: define void @nested_loop_non_dominating(
+; CHECK-SAME: ptr [[BASE:%.*]], i32 [[OUTER_N:%.*]], i32 [[INNER_N:%.*]], i32 [[STRIDE:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    [[STRIDE20:%.*]] = trunc i32 [[STRIDE]] to i20
+; CHECK-NEXT:    [[TMP0:%.*]] = trunc i32 [[STRIDE]] to i20
+; CHECK-NEXT:    br label %[[OUTER_HEADER:.*]]
+; CHECK:       [[OUTER_HEADER]]:
+; CHECK-NEXT:    [[LSR_IV:%.*]] = phi ptr [ [[SCEVGEP:%.*]], %[[OUTER_LATCH:.*]] ], [ [[BASE]], %[[ENTRY]] ]
+; CHECK-NEXT:    [[OUTER_I:%.*]] = phi i32 [ 0, %[[ENTRY]] ], [ [[OUTER_NEXT:%.*]], %[[OUTER_LATCH]] ]
+; CHECK-NEXT:    [[OUTER_CMP:%.*]] = icmp slt i32 [[OUTER_I]], [[OUTER_N]]
+; CHECK-NEXT:    br i1 [[OUTER_CMP]], label %[[INNER_PREHEADER:.*]], label %[[EXIT:.*]]
+; CHECK:       [[INNER_PREHEADER]]:
+; CHECK-NEXT:    br label %[[INNER_HEADER:.*]]
+; CHECK:       [[INNER_HEADER]]:
+; CHECK-NEXT:    [[INNER_PTR:%.*]] = phi ptr [ [[SCEVGEP2:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV]], %[[INNER_PREHEADER]] ]
+; CHECK-NEXT:    [[INNER_I:%.*]] = phi i32 [ 0, %[[INNER_PREHEADER]] ], [ [[INNER_NEXT:%.*]], %[[INNER_HEADER]] ]
+; CHECK-NEXT:    [[VAL:%.*]] = load <32 x i16>, ptr [[INNER_PTR]], align 64
+; CHECK-NEXT:    call void @consume(<32 x i16> [[VAL]])
+; CHECK-NEXT:    [[INNER_NEXT]] = add i32 [[INNER_I]], 1
+; CHECK-NEXT:    [[SCEVGEP2]] = getelementptr i8, ptr [[INNER_PTR]], i20 64
+; CHECK-NEXT:    [[INNER_CMP:%.*]] = icmp slt i32 [[INNER_NEXT]], [[INNER_N]]
+; CHECK-NEXT:    br i1 [[INNER_CMP]], label %[[INNER_HEADER]], label %[[OUTER_LATCH]]
+; CHECK:       [[OUTER_LATCH]]:
+; CHECK-NEXT:    [[OUTER_NEXT]] = add i32 [[OUTER_I]], 1
+; CHECK-NEXT:    [[SCEVGEP]] = getelementptr i8, ptr [[LSR_IV]], i20 [[TMP0]]
+; CHECK-NEXT:    br label %[[OUTER_HEADER]]
+; CHECK:       [[EXIT]]:
+; CHECK-NEXT:    ret void
+;
 entry:
   %stride20 = trunc i32 %stride to i20
   br label %outer_header
@@ -60,10 +83,10 @@ inner_header:
   %inner_offset_32 = mul i32 %inner_i, 64
   %inner_offset = trunc i32 %inner_offset_32 to i20
   %inner_ptr = getelementptr i8, ptr %outer_ptr, i20 %inner_offset
-  
+
   %val = load <32 x i16>, ptr %inner_ptr, align 64
   call void @consume(<32 x i16> %val)
-  
+
   %inner_next = add i32 %inner_i, 1
   %inner_cmp = icmp slt i32 %inner_next, %inner_n
   br i1 %inner_cmp, label %inner_header, label %outer_latch
@@ -80,18 +103,49 @@ exit:
 ; Test: Multiple arrays in nested loop - even worse regression
 ; Each array creates its own pointer PHI, multiplying outer latch cost
 ;
-; CHECK-LABEL: define void @nested_loop_multiple_arrays
-; CHECK: outer_header:
 ; Outer loop should have scalar i20 PHI, not pointer PHIs
-; CHECK: phi i20
-; CHECK: inner_header:
 ; Inner loop should use scalar i20 recurrence
-; CHECK: [[INNER_IV:%.*]] = phi i20
-; CHECK: getelementptr i8, ptr {{%.*}}, i20 [[INNER_IV]]
-; CHECK: outer_latch:
 ; Outer latch should have scalar add, not multiple pointer scevgeps
-; CHECK: add i20
 define void @nested_loop_multiple_arrays(ptr %a, ptr %b, ptr %c, i32 %outer_n, i32 %inner_n, i32 %stride) {
+; CHECK-LABEL: define void @nested_loop_multiple_arrays(
+; CHECK-SAME: ptr [[A:%.*]], ptr [[B:%.*]], ptr [[C:%.*]], i32 [[OUTER_N:%.*]], i32 [[INNER_N:%.*]], i32 [[STRIDE:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    [[STRIDE20:%.*]] = trunc i32 [[STRIDE]] to i20
+; CHECK-NEXT:    [[TMP0:%.*]] = trunc i32 [[STRIDE]] to i20
+; CHECK-NEXT:    br label %[[OUTER_HEADER:.*]]
+; CHECK:       [[OUTER_HEADER]]:
+; CHECK-NEXT:    [[LSR_IV7:%.*]] = phi ptr [ [[SCEVGEP8:%.*]], %[[OUTER_LATCH:.*]] ], [ [[A]], %[[ENTRY]] ]
+; CHECK-NEXT:    [[LSR_IV3:%.*]] = phi ptr [ [[SCEVGEP4:%.*]], %[[OUTER_LATCH]] ], [ [[B]], %[[ENTRY]] ]
+; CHECK-NEXT:    [[LSR_IV:%.*]] = phi ptr [ [[SCEVGEP:%.*]], %[[OUTER_LATCH]] ], [ [[C]], %[[ENTRY]] ]
+; CHECK-NEXT:    [[OUTER_I:%.*]] = phi i32 [ 0, %[[ENTRY]] ], [ [[OUTER_NEXT:%.*]], %[[OUTER_LATCH]] ]
+; CHECK-NEXT:    [[OUTER_CMP:%.*]] = icmp slt i32 [[OUTER_I]], [[OUTER_N]]
+; CHECK-NEXT:    br i1 [[OUTER_CMP]], label %[[INNER_PREHEADER:.*]], label %[[EXIT:.*]]
+; CHECK:       [[INNER_PREHEADER]]:
+; CHECK-NEXT:    br label %[[INNER_HEADER:.*]]
+; CHECK:       [[INNER_HEADER]]:
+; CHECK-NEXT:    [[INNER_A:%.*]] = phi ptr [ [[SCEVGEP10:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV7]], %[[INNER_PREHEADER]] ]
+; CHECK-NEXT:    [[INNER_B:%.*]] = phi ptr [ [[SCEVGEP6:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV3]], %[[INNER_PREHEADER]] ]
+; CHECK-NEXT:    [[INNER_C:%.*]] = phi ptr [ [[SCEVGEP2:%.*]], %[[INNER_HEADER]] ], [ [[LSR_IV]], %[[INNER_PREHEADER]] ]
+; CHECK-NEXT:    [[INNER_I:%.*]] = phi i32 [ 0, %[[INNER_PREHEADER]] ], [ [[INNER_NEXT:%.*]], %[[INNER_HEADER]] ]
+; CHECK-NEXT:    [[VAL_A:%.*]] = load <32 x i16>, ptr [[INNER_A]], align 64
+; CHECK-NEXT:    [[VAL_B:%.*]] = load <32 x i16>, ptr [[INNER_B]], align 64
+; CHECK-NEXT:    [[SUM:%.*]] = add <32 x i16> [[VAL_A]], [[VAL_B]]
+; CHECK-NEXT:    store <32 x i16> [[SUM]], ptr [[INNER_C]], align 64
+; CHECK-NEXT:    [[INNER_NEXT]] = add i32 [[INNER_I]], 1
+; CHECK-NEXT:    [[SCEVGEP2]] = getelementptr i8, ptr [[INNER_C]], i20 64
+; CHECK-NEXT:    [[SCEVGEP6]] = getelementptr i8, ptr [[INNER_B]], i20 64
+; CHECK-NEXT:    [[SCEVGEP10]] = getelementptr i8, ptr [[INNER_A]], i20 64
+; CHECK-NEXT:    [[INNER_CMP:%.*]] = icmp slt i32 [[INNER_NEXT]], [[INNER_N]]
+; CHECK-NEXT:    br i1 [[INNER_CMP]], label %[[INNER_HEADER]], label %[[OUTER_LATCH]]
+; CHECK:       [[OUTER_LATCH]]:
+; CHECK-NEXT:    [[OUTER_NEXT]] = add i32 [[OUTER_I]], 1
+; CHECK-NEXT:    [[SCEVGEP]] = getelementptr i8, ptr [[LSR_IV]], i20 [[TMP0]]
+; CHECK-NEXT:    [[SCEVGEP4]] = getelementptr i8, ptr [[LSR_IV3]], i20 [[TMP0]]
+; CHECK-NEXT:    [[SCEVGEP8]] = getelementptr i8, ptr [[LSR_IV7]], i20 [[TMP0]]
+; CHECK-NEXT:    br label %[[OUTER_HEADER]]
+; CHECK:       [[EXIT]]:
+; CHECK-NEXT:    ret void
+;
 entry:
   %stride20 = trunc i32 %stride to i20
   br label %outer_header
@@ -113,17 +167,17 @@ inner_header:
   %inner_i = phi i32 [ 0, %inner_preheader ], [ %inner_next, %inner_header ]
   %inner_offset_32 = mul i32 %inner_i, 64
   %inner_offset = trunc i32 %inner_offset_32 to i20
-  
+
   ; Three GEPs - should NOT create 3 pointer PHIs in outer_header
   %inner_a = getelementptr i8, ptr %ptr_a, i20 %inner_offset
   %inner_b = getelementptr i8, ptr %ptr_b, i20 %inner_offset
   %inner_c = getelementptr i8, ptr %ptr_c, i20 %inner_offset
-  
+
   %val_a = load <32 x i16>, ptr %inner_a, align 64
   %val_b = load <32 x i16>, ptr %inner_b, align 64
   %sum = add <32 x i16> %val_a, %val_b
   store <32 x i16> %sum, ptr %inner_c, align 64
-  
+
   %inner_next = add i32 %inner_i, 1
   %inner_cmp = icmp slt i32 %inner_next, %inner_n
   br i1 %inner_cmp, label %inner_header, label %outer_latch
