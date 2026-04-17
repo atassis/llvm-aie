@@ -246,7 +246,7 @@ void AIEScheduleInterpreter::dumpEventSchedule(const EventSchedule &Schedule,
     // Print bypass events if any exist for this VReg.
     const auto &BypassEvents = BypassEventsByVReg[VReg];
     if (!BypassEvents.empty()) {
-      OS << "         bypass   |";
+      OS << "         bypass    |";
       PrintEventRow(BypassEvents);
     }
   }
