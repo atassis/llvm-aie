@@ -21,6 +21,7 @@
 #ifndef LLVM_LIB_TARGET_AIE_AIEREGDEFUSETRACKER_H
 #define LLVM_LIB_TARGET_AIE_AIEREGDEFUSETRACKER_H
 
+#include "AIEBaseInstrInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -305,6 +306,12 @@ class RegLiveRangeTracker {
   bool overlapsAnyInSet(MCRegister Reg,
                         const DenseSet<MCRegister> &RegSet) const;
 
+  /// Check if all instructions in a live range have fixed itineraries.
+  /// An instruction has a fixed itinerary if it has at most one schedule class
+  /// variant, meaning the schedule class doesn't depend on operand register
+  /// classes.
+  bool hasAllInstructionsWithFixedItinerary(const RegLiveRange &LR) const;
+
   /// Compute the register class for a live range based on all its operands
   void computeRegisterClass(RegLiveRange &LR) const;
 
@@ -411,6 +418,40 @@ class RegLiveRangeTracker {
 
   /// Compute register classes and apply register class filtering.
   void computeRegisterClassesAndFilter();
+
+  //===--------------------------------------------------------------------===//
+  // Schedule class-preserving register class refinement
+  //===--------------------------------------------------------------------===//
+
+  /// Information about an instruction with variable itineraries.
+  /// Used during register class refinement to preserve schedule class
+  /// determinism.
+  struct VarItinInstrInfo {
+    /// The original schedule class computed using physical registers.
+    unsigned OrigSchedClass;
+
+    /// The RC requirements for each operand from the original physreg match.
+    ArrayRef<OperandRCRequirement> OrigOperandRCs;
+
+    /// Map from operand index to live range index.
+    DenseMap<unsigned, unsigned> OperandToLRIdx;
+  };
+
+  /// Map from instruction to its variable itinerary info.
+  using VarItinInstrMap = DenseMap<MachineInstr *, VarItinInstrInfo>;
+
+  /// Stage 2 of register class refinement: collect instructions with variable
+  /// itineraries and record their original schedule classes.
+  void collectVariableItinInstructions(VarItinInstrMap &VarItinInstrs) const;
+
+  /// Stage 3 of register class refinement: check if schedule classes changed
+  /// and narrow LR register classes to restore the original schedule class.
+  /// Returns true if any register class was narrowed.
+  bool checkAndRefineSchedClasses(const VarItinInstrMap &VarItinInstrs);
+
+  /// Orchestrate the three-stage register class refinement algorithm.
+  /// Called at the end of computeRegisterClassesAndFilter().
+  void refineRegisterClassesForSchedClass();
 
   /// Finalize available registers and scarcity after all filtering.
   void finalizeAvailabilityAndScarcity(MachineBasicBlock &MBB,

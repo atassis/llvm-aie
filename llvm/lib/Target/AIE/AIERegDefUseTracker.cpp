@@ -42,8 +42,9 @@ namespace {
 /// Check if a register overlaps with a RegisterMaskPair (live-in/out entry).
 /// Currently uses conservative full-register overlap; lane mask support can
 /// be added later.
-bool overlapsRMP(MCRegister Reg, const MachineBasicBlock::RegisterMaskPair &RMP,
-                 const TargetRegisterInfo *TRI) {
+bool overlapsRegMaskPair(MCRegister Reg,
+                         const MachineBasicBlock::RegisterMaskPair &RMP,
+                         const TargetRegisterInfo *TRI) {
   return TRI->regsOverlap(Reg, RMP.PhysReg);
 }
 
@@ -928,7 +929,7 @@ void RegLiveRangeTracker::addUnusedCallerSavedRegs(
   auto OverlapsAnyRMP = [this](MCRegister Reg, auto &&Range) {
     return llvm::any_of(Range,
                         [&](const MachineBasicBlock::RegisterMaskPair &RMP) {
-                          return overlapsRMP(Reg, RMP, TRI);
+                          return overlapsRegMaskPair(Reg, RMP, TRI);
                         });
   };
 
@@ -1283,24 +1284,223 @@ void RegLiveRangeTracker::computeRegisterClassesAndFilter() {
       continue;
     }
 
-    // Apply register class filtering if specified.
-    if (!ExcludeLiveRangesByRegClass.empty() &&
-        StringRef(TRI->getRegClassName(LR.getRegisterClass())) ==
-            ExcludeLiveRangesByRegClass) {
-      LLVM_DEBUG({
-        dbgs() << "Reject: excluded register class "
-               << TRI->getRegClassName(LR.getRegisterClass()) << ": ";
-        LR.dumpBrief(TRI);
-      });
-      continue;
-    }
-
     ValidRanges.push_back(std::move(LR));
   }
   LiveRanges = std::move(ValidRanges);
 
   LLVM_DEBUG(dbgs() << "After register class filtering: " << LiveRanges.size()
                     << " ranges\n");
+
+  // Refine register classes to preserve schedule class determinism.
+  refineRegisterClassesForSchedClass();
+
+  // Apply register class name exclusion after refinement, so it operates
+  // on the final register classes.
+  if (!ExcludeLiveRangesByRegClass.empty()) {
+    SmallVector<RegLiveRange, 16> FilteredRanges;
+    for (RegLiveRange &LR : LiveRanges) {
+      if (StringRef(TRI->getRegClassName(LR.getRegisterClass())) ==
+          ExcludeLiveRangesByRegClass) {
+        LLVM_DEBUG({
+          dbgs() << "Reject: excluded register class "
+                 << TRI->getRegClassName(LR.getRegisterClass()) << ": ";
+          LR.dumpBrief(TRI);
+        });
+        continue;
+      }
+      FilteredRanges.push_back(std::move(LR));
+    }
+    LiveRanges = std::move(FilteredRanges);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Schedule class-preserving register class refinement
+//===----------------------------------------------------------------------===//
+
+void RegLiveRangeTracker::collectVariableItinInstructions(
+    VarItinInstrMap &VarItinInstrs) const {
+
+  // Build a map from operand to live range index for efficient lookup.
+  DenseMap<MachineOperand *, unsigned> OperandToLRIdx;
+  for (unsigned LRIdx = 0; LRIdx < LiveRanges.size(); ++LRIdx) {
+    const RegLiveRange &LR = LiveRanges[LRIdx];
+    for (const auto &OpInfo : LR.operands()) {
+      OperandToLRIdx[OpInfo.getOperand()] = LRIdx;
+    }
+  }
+
+  // Collect all instructions connected to live ranges that have variable
+  // itineraries (more than one schedule class variant).
+  for (unsigned LRIdx = 0; LRIdx < LiveRanges.size(); ++LRIdx) {
+    const RegLiveRange &LR = LiveRanges[LRIdx];
+
+    for (const auto &OpInfo : LR.operands()) {
+      MachineInstr *MI = OpInfo.getOperand()->getParent();
+      if (!MI)
+        continue;
+
+      // Skip if already processed.
+      if (VarItinInstrs.count(MI))
+        continue;
+
+      // Check if this instruction has variable itineraries.
+      const unsigned NumVariants = TII->getNumSchedClassVariants(MI->getDesc());
+      if (NumVariants <= 1)
+        continue;
+
+      // This instruction has variable itineraries - record it.
+      VarItinInstrInfo &Info = VarItinInstrs[MI];
+
+      // Get the original schedule class using physical registers.
+      Info.OrigSchedClass =
+          TII->getSchedClass(MI->getDesc(), MI->operands(), MF->getRegInfo());
+
+      // Get the matching operand RC requirements for the physreg match.
+      Info.OrigOperandRCs = TII->getMatchingOperandRCs(
+          MI->getDesc(), MI->operands(), MF->getRegInfo());
+
+      // Record which operands belong to which live ranges.
+      for (unsigned OpIdx = 0; OpIdx < MI->getNumOperands(); ++OpIdx) {
+        MachineOperand &MO = MI->getOperand(OpIdx);
+        if (!MO.isReg() || !MO.getReg())
+          continue;
+
+        auto It = OperandToLRIdx.find(&MO);
+        if (It != OperandToLRIdx.end()) {
+          Info.OperandToLRIdx[OpIdx] = It->second;
+        }
+      }
+    }
+  }
+
+  LLVM_DEBUG(dbgs() << "Collected " << VarItinInstrs.size()
+                    << " instructions with variable itineraries\n");
+}
+
+bool RegLiveRangeTracker::checkAndRefineSchedClasses(
+    const VarItinInstrMap &VarItinInstrs) {
+  bool Changed = false;
+
+  for (const auto &[MI, Info] : VarItinInstrs) {
+    // Build OperandRegInfo array using current LR register classes.
+    SmallVector<OperandRegInfo, 8> OperandRegs;
+    for (unsigned OpIdx = 0; OpIdx < MI->getNumOperands(); ++OpIdx) {
+      const MachineOperand &MO = MI->getOperand(OpIdx);
+      if (!MO.isReg() || !MO.getReg()) {
+        OperandRegs.emplace_back();
+        continue;
+      }
+
+      // Check if this operand belongs to a live range.
+      auto LRIt = Info.OperandToLRIdx.find(OpIdx);
+      if (LRIt != Info.OperandToLRIdx.end()) {
+        // Use the live range's current register class.
+        const unsigned LRIdx = LRIt->second;
+        const TargetRegisterClass *RC = LiveRanges[LRIdx].getRegisterClass();
+        OperandRegs.emplace_back(RC);
+      } else if (MO.getReg().isPhysical()) {
+        // Non-LR physical register - use directly.
+        OperandRegs.emplace_back(MO.getReg());
+      } else {
+        // Non-LR virtual register - use its register class.
+        const TargetRegisterClass *RC =
+            MF->getRegInfo().getRegClass(MO.getReg());
+        OperandRegs.emplace_back(RC);
+      }
+    }
+
+    // Compute the schedule class with current LR register classes.
+    const unsigned NewSchedClass =
+        TII->getSchedClass(MI->getDesc(), OperandRegs);
+
+    // If the schedule class changed, we need to narrow LR register classes.
+    if (NewSchedClass != Info.OrigSchedClass) {
+      LLVM_DEBUG(dbgs() << "Schedule class mismatch for " << *MI
+                        << "  Original: " << Info.OrigSchedClass
+                        << ", Current: " << NewSchedClass << "\n");
+
+      // For each LR operand, intersect its RC with the RC from the original
+      // physreg match.
+      for (const auto &[OpIdx, LRIdx] : Info.OperandToLRIdx) {
+        // Find the required RC for this operand from the original match.
+        const TargetRegisterClass *RequiredRC = nullptr;
+        for (const OperandRCRequirement &Req : Info.OrigOperandRCs) {
+          if (Req.OpIdx == OpIdx) {
+            RequiredRC = Req.RC;
+            break;
+          }
+        }
+
+        if (!RequiredRC)
+          continue;
+
+        RegLiveRange &LR = LiveRanges[LRIdx];
+        const TargetRegisterClass *CurrentRC = LR.getRegisterClass();
+
+        // Intersect the LR's RC with the required RC.
+        const TargetRegisterClass *IntersectedRC =
+            TRI->getCommonSubClass(CurrentRC, RequiredRC);
+
+        if (IntersectedRC && IntersectedRC != CurrentRC) {
+          LLVM_DEBUG(dbgs() << "  Narrowing LR#" << LR.getID() << " from "
+                            << TRI->getRegClassName(CurrentRC) << " to "
+                            << TRI->getRegClassName(IntersectedRC) << "\n");
+          LR.setRegisterClass(IntersectedRC);
+          Changed = true;
+        } else if (!IntersectedRC) {
+          // No common subclass - this shouldn't happen with valid LRs.
+          LLVM_DEBUG(dbgs()
+                     << "  Warning: no common subclass for LR#" << LR.getID()
+                     << " between " << TRI->getRegClassName(CurrentRC)
+                     << " and " << TRI->getRegClassName(RequiredRC) << "\n");
+        }
+      }
+    }
+  }
+
+  return Changed;
+}
+
+void RegLiveRangeTracker::refineRegisterClassesForSchedClass() {
+  LLVM_DEBUG(dbgs() << "\nRefining register classes for schedule class "
+                       "determinism\n");
+
+  // Stage 1: Current register classes are already computed (optimistic).
+  // computeRegisterClass() was called in the loop above, giving us the
+  // broadest RCs that satisfy operand constraints.
+
+  // Stage 2: Collect variable-itinerary instructions and record original
+  // schedule classes.
+  VarItinInstrMap VarItinInstrs;
+  collectVariableItinInstructions(VarItinInstrs);
+
+  if (VarItinInstrs.empty()) {
+    LLVM_DEBUG(dbgs() << "No variable-itinerary instructions - skipping "
+                         "refinement\n");
+    return;
+  }
+
+  // Stage 3: Fixed-point loop to narrow RCs when schedule classes change.
+  unsigned Iteration = 0;
+  const unsigned MaxIterations = 10;
+  while (Iteration < MaxIterations) {
+    LLVM_DEBUG(dbgs() << "Refinement iteration " << Iteration << "\n");
+
+    const bool Changed = checkAndRefineSchedClasses(VarItinInstrs);
+    if (!Changed) {
+      LLVM_DEBUG(dbgs() << "Fixed point reached after " << Iteration + 1
+                        << " iterations\n");
+      break;
+    }
+
+    ++Iteration;
+  }
+
+  if (Iteration == MaxIterations) {
+    LLVM_DEBUG(dbgs() << "Warning: max iterations reached in register class "
+                         "refinement\n");
+  }
 }
 
 void RegLiveRangeTracker::finalizeAvailabilityAndScarcity(
@@ -1369,9 +1569,34 @@ void RegLiveRange::setRegisterClass(const TargetRegisterClass *RC) {
   }
 }
 
+bool RegLiveRangeTracker::hasAllInstructionsWithFixedItinerary(
+    const RegLiveRange &LR) const {
+  // Check if all instructions connected by this live range have fixed
+  // itineraries (single schedule class variant). An instruction has a fixed
+  // itinerary if getNumSchedClassVariants returns 0 or 1.
+  for (const auto &OpInfo : LR.operands()) {
+    MachineInstr *MI = OpInfo.getOperand()->getParent();
+    if (!MI)
+      continue;
+
+    const unsigned NumVariants = TII->getNumSchedClassVariants(MI->getDesc());
+    if (NumVariants > 1) {
+      // This instruction has multiple schedule class variants, meaning
+      // its itinerary depends on operand register classes.
+      return false;
+    }
+  }
+
+  // All instructions have fixed itineraries.
+  return true;
+}
+
 void RegLiveRangeTracker::computeRegisterClass(RegLiveRange &LR) const {
   if (LR.getBaseReg() == MCRegister::NoRegister)
     return;
+
+  LLVM_DEBUG(dbgs() << "  computeRegisterClass for LR#" << LR.getID()
+                    << " (base=" << TRI->getName(LR.getBaseReg()) << "):\n");
 
   // Start with nullptr, representing the universe of all register classes.
   // Intersection with nullptr is identity: intersect(nullptr, X) = X
@@ -1386,19 +1611,45 @@ void RegLiveRangeTracker::computeRegisterClass(RegLiveRange &LR) const {
     const TargetRegisterClass *OpRC =
         MI->getRegClassConstraint(OpIdx, TII, TRI);
 
+    LLVM_DEBUG({
+      dbgs() << "    Op#" << OpIdx << " "
+             << (OpInfo.getOperand()->isDef() ? "def" : "use") << " in "
+             << AIE::NoDebug(*MI);
+      dbgs() << "      getRegClassConstraint -> "
+             << (OpRC ? TRI->getRegClassName(OpRC) : "(null)");
+      if (OpInfo.getSubRegIdx() != 0)
+        dbgs() << " (subRegIdx=" << OpInfo.getSubRegIdx() << ")";
+      dbgs() << "\n";
+    });
+
     if (OpRC) {
       // Account for subregister access
       if (OpInfo.getSubRegIdx() != 0) {
         // Get the class that can be used with this subreg index
+        const TargetRegisterClass *OrigOpRC = OpRC;
         OpRC = TRI->getSubClassWithSubReg(OpRC, OpInfo.getSubRegIdx());
+        LLVM_DEBUG(dbgs() << "      getSubClassWithSubReg("
+                          << TRI->getRegClassName(OrigOpRC) << ", "
+                          << OpInfo.getSubRegIdx() << ") -> "
+                          << (OpRC ? TRI->getRegClassName(OpRC) : "(null)")
+                          << "\n");
       }
 
       if (OpRC) {
         // Intersect: nullptr is identity, otherwise find common subclass
         if (!CommonRC) {
           CommonRC = OpRC;
+          LLVM_DEBUG(dbgs() << "      Initial RC = "
+                            << TRI->getRegClassName(CommonRC) << "\n");
         } else {
+          const TargetRegisterClass *PrevRC = CommonRC;
           CommonRC = TRI->getCommonSubClass(CommonRC, OpRC);
+          LLVM_DEBUG({
+            dbgs() << "      Intersect(" << TRI->getRegClassName(PrevRC) << ", "
+                   << TRI->getRegClassName(OpRC) << ") -> "
+                   << (CommonRC ? TRI->getRegClassName(CommonRC) : "(null)")
+                   << "\n";
+          });
           if (!CommonRC) {
             // No common class possible - this live range is illegal.
             LR.setRegisterClass(nullptr);
@@ -1413,7 +1664,36 @@ void RegLiveRangeTracker::computeRegisterClass(RegLiveRange &LR) const {
   if (!CommonRC) {
     CommonRC = TRI->getMinimalPhysRegClass(LR.getBaseReg());
     assert(CommonRC && "Physical register must have a register class");
+    LLVM_DEBUG(dbgs() << "    No operand constraints, fallback MinRC = "
+                      << TRI->getRegClassName(CommonRC) << "\n");
   }
+
+  LLVM_DEBUG(dbgs() << "    After operand constraints: "
+                    << TRI->getRegClassName(CommonRC) << "\n");
+
+  // Canonicalize to the lowest-ID equivalent class.
+  // Multiple register classes can have the same set of registers (e.g., eDM
+  // and ACC2048 both contain {dm0..dm4}). We pick the one with the lowest
+  // TableGen ID for determinism: regardless of which equivalent class we
+  // start from, we always converge to the same canonical representative.
+  for (const TargetRegisterClass *RC : TRI->regclasses()) {
+    if (RC->getNumRegs() != CommonRC->getNumRegs())
+      continue;
+    if (RC->getID() >= CommonRC->getID())
+      continue;
+    // Check if RC is a subclass of CommonRC with the same registers.
+    const TargetRegisterClass *Sub = TRI->getCommonSubClass(CommonRC, RC);
+    if (Sub == RC) {
+      LLVM_DEBUG(dbgs() << "    Canonicalize: "
+                        << TRI->getRegClassName(CommonRC) << " -> "
+                        << TRI->getRegClassName(RC) << " (same "
+                        << RC->getNumRegs() << " regs, lower ID)\n");
+      CommonRC = RC;
+    }
+  }
+
+  LLVM_DEBUG(dbgs() << "    Final RC = " << TRI->getRegClassName(CommonRC)
+                    << "\n");
 
   LR.setRegisterClass(CommonRC);
 }
