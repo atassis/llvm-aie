@@ -66,7 +66,7 @@
 
 # Verify scarce range set - y0 should be identified with 2 ranges
 # CHECK: Most promising scarce range set: 2 ranges
-# CHECK-NEXT: Register class: eY
+# CHECK-NEXT: Register class: VEC1024
 # CHECK-NEXT:   [0] BaseReg=y0 Defs=2 Uses=1
 # CHECK-NEXT:   [1] BaseReg=y0 Defs=2 Uses=1
 

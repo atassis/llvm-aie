@@ -60,7 +60,7 @@
 
 # Verify scarce range set - both dm4 ranges should be identified as scarce
 # CHECK: Most promising scarce range set: 2 ranges
-# CHECK-NEXT: Register class: eDM
+# CHECK-NEXT: Register class: ACC2048
 # CHECK-NEXT:   [0] BaseReg=dm4 Defs=1 Uses=2
 # CHECK-NEXT:   [1] BaseReg=dm4 Defs=1 Uses=2
 
