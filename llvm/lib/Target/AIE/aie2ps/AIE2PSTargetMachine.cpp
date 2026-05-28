@@ -25,6 +25,7 @@ extern cl::opt<bool> AllocateMRegsFirst;
 extern cl::opt<bool> EnablePreMISchedCoalescer;
 extern cl::opt<bool> EnableFineGrainedStagedRA;
 extern cl::opt<bool> EnableWAWRegRewrite;
+extern cl::opt<bool> EnableOuterLoopEpilogRename;
 extern cl::opt<bool> EnableAddressChaining;
 extern cl::opt<bool> EnableGlobalPtrModOptimizer;
 
@@ -134,10 +135,12 @@ bool AIE2PSPassConfig::addRegAssignAndRewriteOptimized() {
       addPass(createAIEUnallocatedSuperRegRewriter());
   }
   addPass(createGreedyRegisterAllocator());
-  if (EnableWAWRegRewrite) {
+  if (EnableWAWRegRewrite)
     addPass(createAIEWawRegRewriter());
+  if (EnableOuterLoopEpilogRename)
+    addPass(createAIEOuterLoopEpilogRename());
+  if (EnableWAWRegRewrite || EnableOuterLoopEpilogRename)
     addPass(createGreedyRegisterAllocator());
-  }
   addPass(createVirtRegRewriter());
 
   return true;

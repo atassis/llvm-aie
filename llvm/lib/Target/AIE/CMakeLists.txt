@@ -185,6 +185,7 @@ add_llvm_target(AIECodeGen
    AIEOuterLoopPipeliner.cpp
    AIEOutlineMemoryGEP.cpp
    AIEWawRegRewriter.cpp
+   AIEOuterLoopEpilogRename.cpp
    # aie1
    aie1/AIE1AsmPrinter.cpp
    aie1/AIE1AsmPrinter.cpp

@@ -71,8 +71,9 @@ body:             |
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   $srssign0 = MOVX_mvx_cr_imm 0
   ; CHECK-NEXT:   dead renamable $p1 = VST_SRS_4x_dmx_sts_srs_dm_pstm_nrm_imm_srsSign0 killed renamable $dm0, undef renamable $s0, killed renamable $p1, 64, implicit-def $srsrs_of, implicit $crrnd, implicit $crsrsmode, implicit $crsat, implicit $srssign0
-  ; CHECK-NEXT:   renamable $bmll0, renamable $p2 = VLDA_dmx_lda_bm_ld_pstm_nrm_imm killed renamable $p2, 64
-  ; CHECK-NEXT:   dead renamable $bmlh0, dead renamable $p2 = VLDA_dmx_lda_bm_ld_pstm_nrm_imm killed renamable $p2, 64
+  ; CHECK-NEXT:   renamable $bmll1, renamable $p2 = VLDA_dmx_lda_bm_ld_pstm_nrm_imm killed renamable $p2, 64
+  ; CHECK-NEXT:   renamable $bmlh1, dead renamable $p2 = VLDA_dmx_lda_bm_ld_pstm_nrm_imm killed renamable $p2, 64
+  ; CHECK-NEXT:   dead renamable $dm0 = COPY renamable $dm1
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.3.exit:
   ; CHECK-NEXT:   PseudoRET implicit $lr

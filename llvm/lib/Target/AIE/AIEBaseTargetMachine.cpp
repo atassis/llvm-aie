@@ -108,6 +108,12 @@ cl::opt<bool>
                         cl::desc("Enable the WAW Register Renaming in loops"),
                         cl::init(true), cl::Hidden);
 
+cl::opt<bool> EnableOuterLoopEpilogRename(
+    "aie-outerloop-epilog-rename",
+    cl::desc("Split the chain-head vreg of an outer-loop pipeliner epilog "
+             "onto a free physreg family to break post-pipeliner WAR"),
+    cl::init(true), cl::Hidden);
+
 cl::opt<bool>
     EnableSuperRegSplitting("aie-split-superregs", cl::Hidden, cl::init(true),
                             cl::desc("Enable splitting super-regs into their "
@@ -162,6 +168,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAIETarget() {
   initializeAIESuperRegRewriterPass(*PR);
   initializeAIEUnallocatedSuperRegRewriterPass(*PR);
   initializeAIEWawRegRewriterPass(*PR);
+  initializeAIEOuterLoopEpilogRenamePass(*PR);
   initializeAIEOutlineMemoryGEPPass(*PR);
   initializeAIEFinalizeBundlePass(*PR);
   initializeAIEMachineAlignmentPass(*PR);

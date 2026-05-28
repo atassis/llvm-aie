@@ -71,13 +71,14 @@ body:             |
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   renamable $p1 = VST_dmx_sts_x_st_pstm_nrm_imm killed renamable $x2, killed renamable $p1, 64
   ; CHECK-NEXT:   renamable $x0, renamable $p2 = VLDA_dmx_lda_x_ld_pstm_nrm_imm killed renamable $p2, 64
-  ; CHECK-NEXT:   renamable $x2, renamable $p2 = VLDA_dmx_lda_x_ld_pstm_nrm_imm killed renamable $p2, 64
+  ; CHECK-NEXT:   renamable $x8, renamable $p2 = VLDA_dmx_lda_x_ld_pstm_nrm_imm killed renamable $p2, 64
   ; CHECK-NEXT:   renamable $x4, renamable $p2 = VLDA_dmx_lda_x_ld_pstm_nrm_imm killed renamable $p2, 64
   ; CHECK-NEXT:   renamable $x6, dead renamable $p2 = VLDA_dmx_lda_x_ld_pstm_nrm_imm killed renamable $p2, 64
   ; CHECK-NEXT:   renamable $p1 = VST_dmx_sts_x_st_pstm_nrm_imm killed renamable $x0, killed renamable $p1, 64
-  ; CHECK-NEXT:   renamable $p1 = VST_dmx_sts_x_st_pstm_nrm_imm killed renamable $x2, killed renamable $p1, 64
+  ; CHECK-NEXT:   renamable $p1 = VST_dmx_sts_x_st_pstm_nrm_imm renamable $x8, killed renamable $p1, 64
   ; CHECK-NEXT:   renamable $p1 = VST_dmx_sts_x_st_pstm_nrm_imm killed renamable $x4, killed renamable $p1, 64
   ; CHECK-NEXT:   dead renamable $p1 = VST_dmx_sts_x_st_pstm_nrm_imm killed renamable $x6, killed renamable $p1, 64
+  ; CHECK-NEXT:   dead renamable $x2 = COPY killed renamable $x8
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT: bb.3.exit:
   ; CHECK-NEXT:   PseudoRET implicit $lr
