@@ -1051,6 +1051,10 @@ Value *AIEOuterLoopPipeliner::adjustLoopBound(const LoopStructure &LS) {
 //   1. Decrement llvm.loop.itercount.range by 1 (one iteration was peeled).
 //   2. Drop llvm.loop.hint.aie-enable-outer-loop-pipelining (consumed).
 //   3. Insert llvm.loop.hint.aie_outerloop_pipeliner_success = i64 1.
+//   4. Insert llvm.loop.hint.aie-outer-loop-epilog = i64 1 so post-RA passes
+//      (e.g. AIEWawRegRewriter) can identify the steady-state epilog block
+//      (the outer loop's latch) and break WAR hazards on the prefetch chain
+//      it contains.
 void AIEOuterLoopPipeliner::updateLoopMetadata(const LoopStructure &LS) {
   MDNode *LoopID = LS.OuterLoop->getLoopID();
   LLVMContext &Ctx = LS.OuterHeader->getContext();
@@ -1072,6 +1076,8 @@ void AIEOuterLoopPipeliner::updateLoopMetadata(const LoopStructure &LS) {
       "llvm.loop.hint.aie-enable-outer-loop-pipelining"};
   static constexpr StringLiteral SuccessKey{
       "llvm.loop.hint.aie_outerloop_pipeliner_success"};
+  static constexpr StringLiteral EpilogKey{
+      "llvm.loop.hint.aie-outer-loop-epilog"};
 
   SmallVector<Metadata *, 8> MDs;
   for (unsigned I = 1, E = Source->getNumOperands(); I < E; ++I) {
@@ -1089,6 +1095,14 @@ void AIEOuterLoopPipeliner::updateLoopMetadata(const LoopStructure &LS) {
       {MDString::get(Ctx, SuccessKey),
        ConstantAsMetadata::get(ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
   MDs.push_back(SuccessEntry);
+
+  // Append the steady-state epilog marker:
+  // !{!"llvm.loop.hint.aie-outer-loop-epilog", i64 1}
+  MDNode *EpilogEntry = MDNode::get(
+      Ctx,
+      {MDString::get(Ctx, EpilogKey),
+       ConstantAsMetadata::get(ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
+  MDs.push_back(EpilogEntry);
 
   MDNode *FinalLoopID = MDNode::get(Ctx, MDs);
   FinalLoopID->replaceOperandWith(0, FinalLoopID);

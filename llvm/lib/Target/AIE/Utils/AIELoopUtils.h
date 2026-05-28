@@ -35,6 +35,12 @@ bool hasIIPragma(const MachineBasicBlock &LoopBlock);
 
 bool isOuterLoopPipelined(const MachineBasicBlock &LoopLatch);
 
+/// Returns true if MBB is the steady-state epilog block produced by the
+/// outer-loop pipeliner. The pipeliner attaches the
+/// "llvm.loop.hint.aie-outer-loop-epilog" hint to the latch terminator's
+/// MD_loop node; this helper is a thin query of that hint.
+bool isOuterLoopEpilog(const MachineBasicBlock &MBB);
+
 /// Returns true if this is a loop latch that has a pipeliner disable pragma,
 /// none otherwise.
 std::optional<bool> getPipelinerDisabled(const MachineBasicBlock &LoopBlock);

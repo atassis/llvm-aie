@@ -64,6 +64,11 @@ bool isOuterLoopPipelined(const MachineBasicBlock &LoopLatch) {
       .has_value();
 }
 
+bool isOuterLoopEpilog(const MachineBasicBlock &MBB) {
+  return getLoopMetadata(getLoopID(MBB), "llvm.loop.hint.aie-outer-loop-epilog")
+      .has_value();
+}
+
 std::optional<bool> getPipelinerDisabled(const MachineBasicBlock &LoopBlock) {
   if (getLoopMetadata(getLoopID(LoopBlock), "llvm.loop.pipeline.disable"))
     return true;
