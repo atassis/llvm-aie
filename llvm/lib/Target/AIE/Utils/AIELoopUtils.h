@@ -24,6 +24,14 @@ class MachineBasicBlock;
 
 namespace llvm::AIELoopUtils {
 
+/// Loop-hint metadata keys attached/read by the outer-loop pipeliner.
+inline constexpr StringLiteral OuterLoopEnableKey{
+    "llvm.loop.hint.aie-enable-outer-loop-pipelining"};
+inline constexpr StringLiteral OuterLoopSuccessKey{
+    "llvm.loop.hint.aie_outerloop_pipeliner_success"};
+inline constexpr StringLiteral OuterLoopEpilogKey{
+    "llvm.loop.hint.aie-outer-loop-epilog"};
+
 /// Get the LoopID from a single block loop or nullptr
 const MDNode *getLoopID(const MachineBasicBlock &LoopBlock);
 

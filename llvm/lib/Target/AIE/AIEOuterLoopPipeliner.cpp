@@ -1072,37 +1072,22 @@ void AIEOuterLoopPipeliner::updateLoopMetadata(const LoopStructure &LS) {
   if (!Source)
     return;
 
-  static constexpr StringLiteral HintKey{
-      "llvm.loop.hint.aie-enable-outer-loop-pipelining"};
-  static constexpr StringLiteral SuccessKey{
-      "llvm.loop.hint.aie_outerloop_pipeliner_success"};
-  static constexpr StringLiteral EpilogKey{
-      "llvm.loop.hint.aie-outer-loop-epilog"};
-
   SmallVector<Metadata *, 8> MDs;
   for (unsigned I = 1, E = Source->getNumOperands(); I < E; ++I) {
     MDNode *Entry = cast<MDNode>(Source->getOperand(I));
     auto Key = AIELoopUtils::getMetadataKey(*Entry);
-    if (Key && *Key == HintKey)
+    if (Key && *Key == AIELoopUtils::OuterLoopEnableKey)
       continue; // drop the consumed enable hint
     MDs.push_back(Entry);
   }
 
-  // Append the success marker:
-  // !{!"llvm.loop.hint.aie_outerloop_pipeliner_success", i64 1}
-  MDNode *SuccessEntry = MDNode::get(
-      Ctx,
-      {MDString::get(Ctx, SuccessKey),
-       ConstantAsMetadata::get(ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
-  MDs.push_back(SuccessEntry);
-
-  // Append the steady-state epilog marker:
-  // !{!"llvm.loop.hint.aie-outer-loop-epilog", i64 1}
-  MDNode *EpilogEntry = MDNode::get(
-      Ctx,
-      {MDString::get(Ctx, EpilogKey),
-       ConstantAsMetadata::get(ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
-  MDs.push_back(EpilogEntry);
+  auto MakeI64Entry = [&](StringRef Key) {
+    return MDNode::get(Ctx, {MDString::get(Ctx, Key),
+                             ConstantAsMetadata::get(
+                                 ConstantInt::get(Type::getInt64Ty(Ctx), 1))});
+  };
+  MDs.push_back(MakeI64Entry(AIELoopUtils::OuterLoopSuccessKey));
+  MDs.push_back(MakeI64Entry(AIELoopUtils::OuterLoopEpilogKey));
 
   MDNode *FinalLoopID = MDNode::get(Ctx, MDs);
   FinalLoopID->replaceOperandWith(0, FinalLoopID);

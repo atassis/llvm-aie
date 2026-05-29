@@ -59,14 +59,11 @@ bool isOuterLoopPipelined(const MachineBasicBlock &LoopLatch) {
   // This metadata should be inserted by outerloop pipeliner.
   // We just check the availability. No other pass is expected
   // to insert this metadata.
-  return getLoopMetadata(getLoopID(LoopLatch),
-                         "llvm.loop.hint.aie_outerloop_pipeliner_success")
-      .has_value();
+  return getLoopMetadata(getLoopID(LoopLatch), OuterLoopSuccessKey).has_value();
 }
 
 bool isOuterLoopEpilog(const MachineBasicBlock &MBB) {
-  return getLoopMetadata(getLoopID(MBB), "llvm.loop.hint.aie-outer-loop-epilog")
-      .has_value();
+  return getLoopMetadata(getLoopID(MBB), OuterLoopEpilogKey).has_value();
 }
 
 std::optional<bool> getPipelinerDisabled(const MachineBasicBlock &LoopBlock) {
