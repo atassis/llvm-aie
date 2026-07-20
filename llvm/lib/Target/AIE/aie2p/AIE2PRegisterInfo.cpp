@@ -184,11 +184,40 @@ bool AIE2PRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   case AIE2P::VST_dmw_sts_w_spill:
   case AIE2P::VST_dmx_sts_bm_spill:
   case AIE2P::VST_dmx_sts_fifohl_spill:
-  case AIE2P::VST_dmx_sts_x_spill:
   case AIE2P::VLDA_512_COMPOSED_REG_SPILL:
   case AIE2P::VST_512_COMPOSED_REG_SPILL:
     MI.getOperand(FIOperandNum).ChangeToImmediate(Offset);
     return false;
+  case AIE2P::VST_dmx_sts_x_spill: {
+    // VST_dmx_sts_x stores a 512-bit vector; its SP-relative immediate offset is
+    // c16n_step64 (immx64_negative<9>), so it must be a multiple of 64 and fit a
+    // 9-bit negative field. If the frame places the object at a non-64-aligned
+    // offset (or the frame is too large), that immediate cannot be encoded and
+    // the AsmPrinter aborts. As the comment above notes, fall back to a register
+    // offset in that case: copy SP into an allocatable pointer register (SP is
+    // reserved and cannot be a general operand), materialize the offset, and use
+    // the indexed store. This mirrors the VST_PLFR_SPILL path below and
+    // expandSpillPseudo's register-offset expansion.
+    if ((Offset % 64 == 0) && isEncodableAsNegativeInt<9, 64>(Offset)) {
+      MI.getOperand(FIOperandNum).ChangeToImmediate(Offset);
+      return false;
+    }
+    // Reg-offset form of VST_dmx_sts_x (see getRegOffsetSpillInstrInfoFromImmOffset):
+    // VST_dmx_sts_x_idx $src, [$ptr, $dj], offset materialized via MOVXM into eDJ.
+    const MachineOperand &SrcOp = MI.getOperand(0);
+    Register BaseReg = MRI.createVirtualRegister(&AIE2P::ePRegClass);
+    BuildMI(MBB, II, DL, TII->get(TII->getMvSclOpcode()), BaseReg)
+        .addReg(getStackPointerRegister());
+    Register OffsetReg = MRI.createVirtualRegister(&AIE2P::eDJRegClass);
+    BuildMI(MBB, II, DL, TII->get(AIE2P::MOVXM), OffsetReg).addImm(Offset);
+    BuildMI(MBB, II, DL, TII->get(AIE2P::VST_dmx_sts_x_idx))
+        .addReg(SrcOp.getReg(), getRegState(SrcOp))
+        .addReg(BaseReg)
+        .addReg(OffsetReg)
+        .cloneMemRefs(MI);
+    MI.eraseFromParent();
+    return true;
+  }
   case AIE2P::LDA_R_SPILL:
   case AIE2P::ST_R_SPILL:
   case AIE2P::VLDA_L_SPILL:
