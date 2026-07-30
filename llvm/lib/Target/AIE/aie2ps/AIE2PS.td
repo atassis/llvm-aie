@@ -16,6 +16,9 @@ include "llvm/Target/AIETarget.td"
 // includes extra definitions for the usage of the CodeGenFormat Backend
 include "llvm/Target/CodeGenFormat.td"
 
+// Per-generation capability SubtargetFeatures.
+include "AIEFeatures.td"
+
 def ptr0 : PtrValueType<i20, 0>;
 
 //===----------------------------------------------------------------------===//
@@ -40,7 +43,7 @@ include "AIECombine.td"
 // AIEngine AIE2ps processors supported.
 //===----------------------------------------------------------------------===//
 
-def : ProcessorModel<"aie2ps", AIE2PSSchedModel, []>;
+def : ProcessorModel<"aie2ps", AIE2PSSchedModel, [FeatureAcc2048]>;
 
 //===----------------------------------------------------------------------===//
 // Define the AIE2PSEngine target.
