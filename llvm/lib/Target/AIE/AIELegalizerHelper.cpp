@@ -1814,6 +1814,53 @@ bool AIELegalizerHelper::legalizeG_CONCAT_VECTORS(LegalizerHelper &Helper,
   return true;
 }
 
+bool AIELegalizerHelper::legalizeG_INSERT_SUBVECTOR(LegalizerHelper &Helper,
+                                                     MachineInstr &MI) const {
+  MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;
+  MachineRegisterInfo &MRI = *MIRBuilder.getMRI();
+
+  GInsertSubvector &IS = cast<GInsertSubvector>(MI);
+  const Register DstReg = IS.getReg(0);
+  const Register BigVec = IS.getBigVec();
+  const Register SubVec = IS.getSubVec();
+  const uint64_t Idx = IS.getIndexImm();
+
+  const LLT DstTy = MRI.getType(DstReg);
+  const LLT SubVecTy = MRI.getType(SubVec);
+  assert(!DstTy.isScalable() && !SubVecTy.isScalable() &&
+         "AIE has no scalable-vector support");
+  const LLT EltTy = DstTy.getElementType();
+  const unsigned NumSubElts = SubVecTy.getNumElements();
+
+  // Split both operands down to per-element scalars and splice the subvector
+  // elements into the big-vector elements at Idx, then rebuild. This is the
+  // generic fallback LegalizerHelper::lower() does not provide for
+  // G_INSERT_SUBVECTOR (unlike G_INSERT); routing through G_UNMERGE_VALUES /
+  // G_BUILD_VECTOR reuses AIE's own already-legal (vpush-based) lowering for
+  // both instead of duplicating it here.
+  auto BigElts = MIRBuilder.buildUnmerge(EltTy, BigVec);
+
+  SmallVector<Register, 8> SubElts;
+  if (NumSubElts == 1) {
+    SubElts.push_back(SubVec);
+  } else {
+    auto SubUnmerge = MIRBuilder.buildUnmerge(EltTy, SubVec);
+    for (unsigned I = 0; I < NumSubElts; ++I)
+      SubElts.push_back(SubUnmerge.getReg(I));
+  }
+
+  SmallVector<Register, 64> DstElts;
+  for (unsigned I = 0; I < Idx; ++I)
+    DstElts.push_back(BigElts.getReg(I));
+  DstElts.append(SubElts.begin(), SubElts.end());
+  for (unsigned I = Idx + NumSubElts; I < DstTy.getNumElements(); ++I)
+    DstElts.push_back(BigElts.getReg(I));
+
+  MIRBuilder.buildMergeLikeInstr(DstReg, DstElts);
+  MI.eraseFromParent();
+  return true;
+}
+
 bool AIELegalizerHelper::legalizeG_BITCAST(LegalizerHelper &Helper,
                                            MachineInstr &MI) const {
   MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;

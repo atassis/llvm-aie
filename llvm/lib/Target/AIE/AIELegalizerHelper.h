@@ -91,6 +91,8 @@ public:
   bool legalizeLoopDecrement(LegalizerHelper &Helper, MachineInstr &MI) const;
   bool legalizeG_CONCAT_VECTORS(LegalizerHelper &Helper,
                                 MachineInstr &MI) const;
+  bool legalizeG_INSERT_SUBVECTOR(LegalizerHelper &Helper,
+                                  MachineInstr &MI) const;
   bool legalizeBinOp(LegalizerHelper &Helper, MachineInstr &MI) const;
 
   // Helper functions for legalization

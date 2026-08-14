@@ -782,6 +782,11 @@ AIE2PLegalizerInfo::AIE2PLegalizerInfo(const AIE2PSubtarget &ST)
       .clampMaxNumElements(0, S64, 8)
       .custom();
 
+  // Fixed-vector-only (AIE has no scalable-vector support); reachable from
+  // plain IR via the llvm.vector.insert intrinsic, which the IRTranslator
+  // lowers to this opcode unconditionally.
+  getActionDefinitionsBuilder(G_INSERT_SUBVECTOR).custom();
+
   getActionDefinitionsBuilder(G_SHUFFLE_VECTOR)
       // Checks if the shuffle is "canonical", this enables additional actions
       // in the LLVM combiner and can change shuffle vectors legalization
@@ -857,6 +862,8 @@ bool AIE2PLegalizerInfo::legalizeCustom(
     return AIEHelper.legalizeG_SELECT(Helper, MI, /* MaxBitSize */ 512);
   case TargetOpcode::G_CONCAT_VECTORS:
     return AIEHelper.legalizeG_CONCAT_VECTORS(Helper, MI);
+  case TargetOpcode::G_INSERT_SUBVECTOR:
+    return AIEHelper.legalizeG_INSERT_SUBVECTOR(Helper, MI);
   case TargetOpcode::G_BITCAST:
     return AIEHelper.legalizeG_BITCAST(Helper, MI);
   case TargetOpcode::G_ADD:
