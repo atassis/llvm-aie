@@ -35706,6 +35706,45 @@ addmsc_elem_16_2(v32int16 a, int sgn_x, v32int16 b, int sgn_y, v16acc64 acc1,
   int conf = aie2p_compute_control(sgn_x, sgn_y, 1, 3, 2, 0, 0, 0, 0, 0, 0);
   return __builtin_aie2p_I512_I512_ACC1024_addmsc_conf(a, b, acc1, acc2, conf);
 }
+
+// Complex 16b x 16b, two terms per lane. Same multiplier configuration as the
+// integer mul_elem_16_2 above (amode 1, bmode 3); complex differs only in
+// variant 2 -> 4 and the OP_TERM_NEG_COMPLEX term negation, which is what
+// combines the four real partial products into (re, im). Halved lane count is
+// the wider complex accumulator: 8 x cacc64 fills the same ACC1024.
+INTRINSIC(v8cacc64) mul_elem_8_2(v16cint16 a, v16cint16 b) {
+  int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, 0, 0,
+                                   0, 0, 0, OP_TERM_NEG_COMPLEX);
+  return __builtin_aie2p_I512_I512_ACC1024_mul_conf(a, b, conf);
+}
+INTRINSIC(v8cacc64) negmul_elem_8_2(v16cint16 a, v16cint16 b) {
+  int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, 0, 0,
+                                   0, 0, 0, OP_TERM_NEG_COMPLEX);
+  return __builtin_aie2p_I512_I512_ACC1024_negmul_conf(a, b, conf);
+}
+INTRINSIC(v8cacc64) mac_elem_8_2(v16cint16 a, v16cint16 b, v8cacc64 acc) {
+  int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, 0, 0,
+                                   0, 0, 0, OP_TERM_NEG_COMPLEX);
+  return __builtin_aie2p_I512_I512_ACC1024_mac_conf(a, b, acc, conf);
+}
+INTRINSIC(v8cacc64) msc_elem_8_2(v16cint16 a, v16cint16 b, v8cacc64 acc) {
+  int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, 0, 0,
+                                   0, 0, 0, OP_TERM_NEG_COMPLEX);
+  return __builtin_aie2p_I512_I512_ACC1024_msc_conf(a, b, acc, conf);
+}
+INTRINSIC(v8cacc64)
+addmac_elem_8_2(v16cint16 a, v16cint16 b, v8cacc64 acc1, v8cacc64 acc2) {
+  int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, 0, 0,
+                                   0, 0, 0, OP_TERM_NEG_COMPLEX);
+  return __builtin_aie2p_I512_I512_ACC1024_addmac_conf(a, b, acc1, acc2, conf);
+}
+INTRINSIC(v8cacc64)
+addmsc_elem_8_2(v16cint16 a, v16cint16 b, v8cacc64 acc1, v8cacc64 acc2) {
+  int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, 0, 0,
+                                   0, 0, 0, OP_TERM_NEG_COMPLEX);
+  return __builtin_aie2p_I512_I512_ACC1024_addmsc_conf(a, b, acc1, acc2, conf);
+}
+
 INTRINSIC(v16acc64) mul_elem_16_2_conf(v32int16 a, v32int16 b, int sub_mul) {
   int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 2, 0, 0,
                                    sub_mul, 0, 0, 0);

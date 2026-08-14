@@ -35,8 +35,7 @@ struct v4cacc64 {
   v4cacc64(v8cint32);
   operator v8cint32();
 };
-struct v8cacc64 {};
-struct v16cacc64 {};
+// v8cacc64 / v16cacc64 are real types now -- see aie2p_defines.h.
 
 struct v1cfloat {};
 struct v2cfloat {};

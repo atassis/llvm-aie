@@ -113,4 +113,22 @@
 #define ups_nohi 0
 #define ups_dohi 1
 
+#ifdef __cplusplus
+// Complex accumulator vectors. The accumulator file has no complex element
+// type: a cacc64 lane is just an adjacent (re, im) acc64 pair, so v8cacc64 and
+// v16acc64 cover the same 1024 bits. A typedef would make them the same type
+// and every complex-vs-integer intrinsic overload would collide, so wrap the
+// underlying vector instead of aliasing it.
+#define __AIE2P_CACC_VECTOR(__CName, __UName)                                  \
+  struct __CName {                                                             \
+    __UName __u;                                                               \
+    __CName() = default;                                                       \
+    __CName(__UName __x) : __u(__x) {}                                         \
+    operator __UName() const { return __u; }                                   \
+  }
+__AIE2P_CACC_VECTOR(v8cacc64, v16acc64);
+__AIE2P_CACC_VECTOR(v16cacc64, v32acc64);
+#undef __AIE2P_CACC_VECTOR
+#endif // __cplusplus
+
 #endif // __AIE2P_DEFINES_H__
