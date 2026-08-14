@@ -17,6 +17,8 @@
 #include "AIEBaseSubtarget.h"
 #include "Utils/AIELoopUtils.h"
 #include "llvm/CodeGen/LiveIntervals.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 using namespace llvm;
 
@@ -26,4 +28,17 @@ bool AIEBaseRegisterInfo::shouldCoalesce(
     const TargetRegisterClass *NewRC, LiveIntervals &LIS) const {
   return TargetRegisterInfo::shouldCoalesce(MI, SrcRC, SubReg, DstRC, DstSubReg,
                                             NewRC, LIS);
+}
+
+void llvm::expandSpillWithIndexedFallback(MachineInstr &MI,
+                                          const AIEBaseInstrInfo &TII,
+                                          const TargetRegisterInfo &TRI,
+                                          const TargetRegisterClass *PtrRC,
+                                          Register StackReg, int Offset) {
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+  Register SPReg = MRI.createVirtualRegister(PtrRC);
+  BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(TII.getMvSclOpcode()), SPReg)
+      .addReg(StackReg);
+  TII.expandSpillPseudo(MI, TRI, /*SubRegOffsetAlign=*/Align(4), SPReg, Offset);
 }

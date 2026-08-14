@@ -156,6 +156,23 @@ template <int N, unsigned step> bool isEncodableAsNegativeInt(int Value) {
   return isInt<N + CTLog2<step>() + 1>(Value);
 }
 
+struct AIEBaseInstrInfo;
+class MachineInstr;
+
+/// Fallback for a spill pseudo whose frame offset does not fit the pseudo's
+/// immediate form: materialize \p StackReg into a fresh \p PtrRC scratch
+/// register and re-expand \p MI using indexed (register-offset) addressing,
+/// which encodes any offset. Every AIE eliminateFrameIndex case that offers
+/// both an immediate and an indexed spill form (aie2p EX_SPILL/PLFR_SPILL,
+/// aie2ps's per-width _SPILL cases) uses this exact fallback shape; this is
+/// the shared out-of-line arm so each case only differs in its encodability
+/// check and register class.
+void expandSpillWithIndexedFallback(MachineInstr &MI,
+                                    const AIEBaseInstrInfo &TII,
+                                    const TargetRegisterInfo &TRI,
+                                    const TargetRegisterClass *PtrRC,
+                                    Register StackReg, int Offset);
+
 } // namespace llvm
 
 #endif // LLVM_LIB_TARGET_AIE_AIEBASEREGISTERINFO_H

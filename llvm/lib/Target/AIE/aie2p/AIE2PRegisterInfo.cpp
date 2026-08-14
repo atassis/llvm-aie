@@ -209,12 +209,8 @@ bool AIE2PRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MI.getOperand(FIOperandNum).ChangeToImmediate(Offset);
       TII->expandSpillPseudo(MI, TRI, /*SubRegOffsetAlign=*/Align(4));
     } else {
-      Register SPReg =
-          MF.getRegInfo().createVirtualRegister(&AIE2P::ePRegClass);
-      BuildMI(MBB, II, DL, TII->get(TII->getMvSclOpcode()), SPReg)
-          .addReg(getStackPointerRegister());
-      TII->expandSpillPseudo(MI, TRI, /*SubRegOffsetAlign=*/Align(4), SPReg,
-                             Offset);
+      expandSpillWithIndexedFallback(MI, *TII, TRI, &AIE2P::ePRegClass,
+                                     getStackPointerRegister(), Offset);
     }
     return true;
   }
@@ -250,12 +246,8 @@ bool AIE2PRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MI.getOperand(FIOperandNum).ChangeToImmediate(Offset);
       TII->expandSpillPseudo(MI, TRI, /*SubRegOffsetAlign=*/Align(4));
     } else {
-      Register SPReg =
-          MF.getRegInfo().createVirtualRegister(&AIE2P::ePRegClass);
-      BuildMI(MBB, II, DL, TII->get(TII->getMvSclOpcode()), SPReg)
-          .addReg(getStackPointerRegister());
-      TII->expandSpillPseudo(MI, TRI, /*SubRegOffsetAlign=*/Align(4), SPReg,
-                             Offset);
+      expandSpillWithIndexedFallback(MI, *TII, TRI, &AIE2P::ePRegClass,
+                                     getStackPointerRegister(), Offset);
     }
     return true;
   }
