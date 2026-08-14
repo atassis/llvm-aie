@@ -35745,6 +35745,83 @@ addmsc_elem_8_2(v16cint16 a, v16cint16 b, v8cacc64 acc1, v8cacc64 acc2) {
   return __builtin_aie2p_I512_I512_ACC1024_addmsc_conf(a, b, acc1, acc2, conf);
 }
 
+// Complex 16b x 16b elementwise, conf forms. Same multiplier configuration as
+// the integer elem_16_2 (amode 1, bmode 3) with the complex variant; the caller
+// supplies the term negation (OP_TERM_NEG_COMPLEX, its conjugate forms, or a
+// butterfly mask) because aie_api picks it per FFT stage.
+#define __AIE2P_CPLX_CONF(__zero_acc, __shift16, __sub_mul, __sub_acc1,        \
+                          __sub_acc2, __sub_mask)                              \
+  aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 4, (__zero_acc),   \
+                        (__shift16), (__sub_mul), (__sub_acc1), (__sub_acc2),  \
+                        (__sub_mask))
+
+INTRINSIC(v16cacc64)
+mul_elem_16_conf(v16cint16 a, v16cint16 b, int sub_mask, int sub_mul) {
+  int conf = __AIE2P_CPLX_CONF(0, 0, sub_mul, 0, 0, sub_mask);
+  return __builtin_aie2p_I512_I512_ACC2048_mul_conf(a, b, conf);
+}
+INTRINSIC(v16cacc64)
+negmul_elem_16_conf(v16cint16 a, v16cint16 b, int sub_mask, int sub_mul) {
+  int conf = __AIE2P_CPLX_CONF(0, 0, sub_mul, 0, 0, sub_mask);
+  return __builtin_aie2p_I512_I512_ACC2048_negmul_conf(a, b, conf);
+}
+INTRINSIC(v16cacc64)
+mac_elem_16_conf(v16cint16 a, v16cint16 b, v16cacc64 acc, int zero_acc,
+                 int shift16, int sub_mask, int sub_mul, int sub_acc1) {
+  int conf =
+      __AIE2P_CPLX_CONF(zero_acc, shift16, sub_mul, sub_acc1, 0, sub_mask);
+  return __builtin_aie2p_I512_I512_ACC2048_mac_conf(a, b, acc, conf);
+}
+INTRINSIC(v16cacc64)
+msc_elem_16_conf(v16cint16 a, v16cint16 b, v16cacc64 acc, int zero_acc,
+                 int shift16, int sub_mask, int sub_mul, int sub_acc1) {
+  int conf =
+      __AIE2P_CPLX_CONF(zero_acc, shift16, sub_mul, sub_acc1, 0, sub_mask);
+  return __builtin_aie2p_I512_I512_ACC2048_msc_conf(a, b, acc, conf);
+}
+INTRINSIC(v16cacc64)
+addmac_elem_16_conf(v16cint16 a, v16cint16 b, v16cacc64 acc1, v16cacc64 acc2,
+                    int zero_acc, int shift16, int sub_mask, int sub_mul,
+                    int sub_acc1, int sub_acc2) {
+  int conf = __AIE2P_CPLX_CONF(zero_acc, shift16, sub_mul, sub_acc1, sub_acc2,
+                               sub_mask);
+  return __builtin_aie2p_I512_I512_ACC2048_addmac_conf(a, b, acc1, acc2, conf);
+}
+INTRINSIC(v16cacc64)
+addmsc_elem_16_conf(v16cint16 a, v16cint16 b, v16cacc64 acc1, v16cacc64 acc2,
+                    int zero_acc, int shift16, int sub_mask, int sub_mul,
+                    int sub_acc1, int sub_acc2) {
+  int conf = __AIE2P_CPLX_CONF(zero_acc, shift16, sub_mul, sub_acc1, sub_acc2,
+                               sub_mask);
+  return __builtin_aie2p_I512_I512_ACC2048_addmsc_conf(a, b, acc1, acc2, conf);
+}
+
+INTRINSIC(v16cacc64)
+mul_elem_16_2_conf(v32cint16 a, v32cint16 b, int sub_mask, int sub_mul) {
+  int conf = __AIE2P_CPLX_CONF(0, 0, sub_mul, 0, 0, sub_mask);
+  return __builtin_aie2p_I1024_I1024_ACC2048_mul_conf(a, b, conf);
+}
+INTRINSIC(v16cacc64)
+negmul_elem_16_2_conf(v32cint16 a, v32cint16 b, int sub_mask, int sub_mul) {
+  int conf = __AIE2P_CPLX_CONF(0, 0, sub_mul, 0, 0, sub_mask);
+  return __builtin_aie2p_I1024_I1024_ACC2048_negmul_conf(a, b, conf);
+}
+INTRINSIC(v16cacc64)
+mac_elem_16_2_conf(v32cint16 a, v32cint16 b, v16cacc64 acc, int zero_acc,
+                   int shift16, int sub_mask, int sub_mul, int sub_acc1) {
+  int conf =
+      __AIE2P_CPLX_CONF(zero_acc, shift16, sub_mul, sub_acc1, 0, sub_mask);
+  return __builtin_aie2p_I1024_I1024_ACC2048_mac_conf(a, b, acc, conf);
+}
+INTRINSIC(v16cacc64)
+msc_elem_16_2_conf(v32cint16 a, v32cint16 b, v16cacc64 acc, int zero_acc,
+                   int shift16, int sub_mask, int sub_mul, int sub_acc1) {
+  int conf =
+      __AIE2P_CPLX_CONF(zero_acc, shift16, sub_mul, sub_acc1, 0, sub_mask);
+  return __builtin_aie2p_I1024_I1024_ACC2048_msc_conf(a, b, acc, conf);
+}
+#undef __AIE2P_CPLX_CONF
+
 INTRINSIC(v16acc64) mul_elem_16_2_conf(v32int16 a, v32int16 b, int sub_mul) {
   int conf = aie2p_compute_control(__SIGN_SIGNED, __SIGN_SIGNED, 1, 3, 2, 0, 0,
                                    sub_mul, 0, 0, 0);

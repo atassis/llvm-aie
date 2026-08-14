@@ -250,4 +250,8 @@ INTRINSIC(v128bfp16ebs8) undef_v128bfp16ebs8() {
   return val;
 }
 
+INTRINSIC(v16cint16) undef_v16cint16() { return (v16cint16)undef_v16int32(); }
+INTRINSIC(v32cint16) undef_v32cint16() { return (v32cint16)undef_v32int32(); }
+INTRINSIC(v16cacc64) undef_v16cacc64() { return v16cacc64(undef_v32acc64()); }
+
 #endif // __AIE2P_UNDEF_H__

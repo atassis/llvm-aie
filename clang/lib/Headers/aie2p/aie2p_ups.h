@@ -692,4 +692,11 @@ INTRINSIC(v32accfloat) ups_to_v32accfloat(v16float a) {
 }
 INTRINSIC(v32accfloat) ups(v16float a) { return ups_to_v32accfloat(a); }
 
+INTRINSIC(v16cacc64) ups_to_v16cacc64(v16cint16 a, int shft, int sign) {
+  return v16cacc64(ups_to_v32acc64((v32int16)a, shft, sign));
+}
+INTRINSIC(v16cacc64) ups_to_v16cacc64(v16cint16 a, int shft) {
+  return ups_to_v16cacc64(a, shft, __SIGN_SIGNED);
+}
+
 #endif // AIE2P_UPS_H

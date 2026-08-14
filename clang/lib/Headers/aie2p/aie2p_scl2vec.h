@@ -1855,4 +1855,39 @@ INTRINSIC(v64bfp16ebs16) shuffle(v64bfp16ebs16 a, unsigned mode) {
   return shuffle(a, UnDef, mode);
 }
 
+// Complex views of the 32b-lane shuffles and inserts. A cint16 lane is one 32b
+// word and a cint32 lane one 64b pair, so these are the integer ops under a
+// different element type -- the shuffle mode, not the cast, picks granularity.
+INTRINSIC(unsigned int) as_uint32(cint16 a) {
+  return ((unsigned int)(unsigned short)a.real) |
+         (((unsigned int)(unsigned short)a.imag) << 16);
+}
+INTRINSIC(v16cint16) broadcast_to_v16cint16(cint16 b) {
+  return (v16cint16)broadcast_to_v16uint32(as_uint32(b));
+}
+INTRINSIC(v16cint16) shuffle(v16cint16 a, unsigned int mode) {
+  return (v16cint16)shuffle((v16int32)a, mode);
+}
+INTRINSIC(v16cint16) shuffle(v16cint16 a, v16cint16 b, unsigned int mode) {
+  return (v16cint16)shuffle((v16int32)a, (v16int32)b, mode);
+}
+INTRINSIC(v16cint16) insert(v16cint16 a, int idx, v8cint16 b) {
+  return (v16cint16)insert((v16int32)a, idx, (v8int32)b);
+}
+INTRINSIC(v16cint16) concat(v8cint16 a, v8cint16 b) {
+  return (v16cint16)concat((v8int32)a, (v8int32)b);
+}
+INTRINSIC(v32cint16) concat(v16cint16 a, v16cint16 b) {
+  return (v32cint16)concat((v16int32)a, (v16int32)b);
+}
+INTRINSIC(v16cint16) extract_v16cint16(v32cint16 a, int idx) {
+  return (v16cint16)extract_v16int32((v32int32)a, idx);
+}
+INTRINSIC(v16cint16) set_v16cint16(int idx, v8cint16 b) {
+  return (v16cint16)set_v16int32(idx, (v8int32)b);
+}
+INTRINSIC(v16cint16) set_v16cint16(int idx, v4cint16 b) {
+  return (v16cint16)set_v16int32(idx, (v4int32)b);
+}
+
 #endif /*__AIEV2_SCL2VEC_H__*/

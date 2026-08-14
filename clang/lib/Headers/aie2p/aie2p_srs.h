@@ -1375,4 +1375,11 @@ INTRINSIC(v64bfp16ebs16) to_v64bfp16ebs16_conf(v64float a, crrnd_t rnd) {
   return r;
 }
 
+INTRINSIC(v16cint16) srs_to_v16cint16(v16cacc64 acc, int shft, int sign) {
+  return (v16cint16)ssrs((v32acc64)acc, shft, sign);
+}
+INTRINSIC(v16cint16) srs_to_v16cint16(v16cacc64 acc, int shft) {
+  return srs_to_v16cint16(acc, shft, __SIGN_SIGNED);
+}
+
 #endif // AIE2P_SRS_H
