@@ -56,11 +56,15 @@ bool AIETargetInfo::initFeatureMap(
     llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags, StringRef CPU,
     const std::vector<std::string> &FeaturesVec) const {
   // Per-generation default capability set. aie2p carries native bfp16 and the
-  // 2048-bit accumulator. Capability is a set, not a level, so this is keyed
-  // off the concrete target rather than assumed to grow monotonically across
+  // 2048-bit accumulator; aie2ps also has the 2048-bit accumulator but not
+  // bfp16. Capability is a set, not a level, so this is keyed off the
+  // concrete target rather than assumed to grow monotonically across
   // generations. User -target-feature flags are applied on top by the base.
   if (isAIE2P(getTriple())) {
     Features["bfp16"] = true;
+    Features["acc2048"] = true;
+  }
+  if (isAIE2PS(getTriple())) {
     Features["acc2048"] = true;
   }
   return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
