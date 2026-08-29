@@ -28,6 +28,8 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 
+#include <optional>
+
 namespace {
 
 template <typename Parser, typename BundleType, typename OperandType>
@@ -82,6 +84,34 @@ protected:
 
   bool processMatchedInstruction(SMLoc IDLoc, OperandVector &Operands,
                                  MCStreamer &Out, MCInst *Inst);
+
+  /// `event #0` and `event #1` carry no operands: the immediate is spelled
+  /// inside their AsmString, so the matcher has nothing to match the parsed
+  /// `#0` against and rejects the line. Return the opcode the immediate
+  /// selects. std::nullopt falls through to the matcher, which keeps its usual
+  /// diagnostic for an immediate that names neither.
+  std::optional<unsigned> selectEventOpcode(const OperandVector &Operands,
+                                            unsigned Event0,
+                                            unsigned Event1) const {
+    if (Operands.size() < 2)
+      return std::nullopt;
+    const auto &Mnemonic = static_cast<const OperandType &>(*Operands[0]);
+    if (!Mnemonic.isToken() || Mnemonic.getToken() != "event")
+      return std::nullopt;
+    for (unsigned I = 1, E = Operands.size(); I != E; ++I) {
+      const auto &Op = static_cast<const OperandType &>(*Operands[I]);
+      if (!Op.isImm())
+        continue;
+      if (const auto *CE = dyn_cast<MCConstantExpr>(Op.getImm())) {
+        if (CE->getValue() == 0)
+          return Event0;
+        if (CE->getValue() == 1)
+          return Event1;
+      }
+      break;
+    }
+    return std::nullopt;
+  }
 
 public:
   BundleType Bundle;

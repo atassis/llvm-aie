@@ -119,32 +119,10 @@ bool AIE2PSAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   LLVM_DEBUG(dbgs() << "Emitting...\t"
                     << "instruction ending with" << getTok().getString());
 
-  // Special handling for EVENT instructions with hardcoded immediates
-  // EVENT_event0 and EVENT_event1 have no operands but their AsmString
-  // includes "#0" or "#1", so we need to handle them specially
-  if (Operands.size() >= 2) {
-    StringRef Mnemonic = ((AIE2PSOperand &)*Operands[0]).getToken();
-    if (Mnemonic == "event") {
-      // The operands will be: [0]=mnemonic, [1]="#", [2]=immediate
-      // Find the immediate operand (skip tokens like "#")
-      for (unsigned i = 1; i < Operands.size(); ++i) {
-        AIE2PSOperand &Op = (AIE2PSOperand &)*Operands[i];
-        if (Op.isImm()) {
-          const MCExpr *Expr = Op.getImm();
-          if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr)) {
-            int64_t ImmVal = CE->getValue();
-            if (ImmVal == 0) {
-              Inst->setOpcode(AIE2PS::EVENT_event0);
-              return processMatchedInstruction(IDLoc, Operands, Out, Inst);
-            } else if (ImmVal == 1) {
-              Inst->setOpcode(AIE2PS::EVENT_event1);
-              return processMatchedInstruction(IDLoc, Operands, Out, Inst);
-            }
-          }
-          break; // Found immediate, stop looking
-        }
-      }
-    }
+  if (std::optional<unsigned> Opcode = selectEventOpcode(
+          Operands, AIE2PS::EVENT_event0, AIE2PS::EVENT_event1)) {
+    Inst->setOpcode(*Opcode);
+    return processMatchedInstruction(IDLoc, Operands, Out, Inst);
   }
 
   auto MatchResult =

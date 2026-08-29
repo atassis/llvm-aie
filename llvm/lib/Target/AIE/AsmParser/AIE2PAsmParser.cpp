@@ -119,6 +119,13 @@ bool AIE2PAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   MCInst *Inst = getContext().createMCInst();
   LLVM_DEBUG(dbgs() << "Emitting...\t"
                     << "instruction ending with" << getTok().getString());
+
+  if (std::optional<unsigned> Opcode = selectEventOpcode(
+          Operands, AIE2P::EVENT_event0, AIE2P::EVENT_event1)) {
+    Inst->setOpcode(*Opcode);
+    return processMatchedInstruction(IDLoc, Operands, Out, Inst);
+  }
+
   auto MatchResult =
       MatchInstructionImpl(Operands, *Inst, ErrorInfo, MatchingInlineAsm);
   switch (MatchResult) {
