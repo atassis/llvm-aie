@@ -3518,6 +3518,27 @@ bool llvm::tryToCombineVectorShiftsByZero(MachineInstr &MI,
 bool llvm::matchBroadcastElement(MachineInstr &MI, MachineRegisterInfo &MRI,
                                  std::pair<Register, Register> &MatchInfo) {
   assert(MI.getOpcode() == TargetOpcode::G_SHUFFLE_VECTOR);
+
+  // buildBroadcastVector() only implements these destination sizes; for anything
+  // else its else-if chain falls through and builds nothing, while applySplatVector()
+  // erases the original instruction unconditionally. That leaves the destination
+  // register used but undefined, which -verify-machineinstrs reports as "Reading
+  // virtual register without a def" and which otherwise surfaces only when a later
+  // pass fails to resolve it. matchSplatVector(), the G_BUILD_VECTOR-side sibling
+  // feeding the same apply function, gates on exactly this set.
+  const LLT DstVecTy = MRI.getType(MI.getOperand(0).getReg());
+  switch (DstVecTy.getSizeInBits()) {
+  case 128:
+  case 256:
+  case 512:
+  case 1024:
+  case 2048:
+    break;
+  default:
+    // unimplemented.
+    return false;
+  }
+
   const auto MaybeSplatIndex = getSplatIndex(MI);
 
   if (!MaybeSplatIndex.has_value())
