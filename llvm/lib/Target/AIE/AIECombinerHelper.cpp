@@ -2059,6 +2059,28 @@ static void buildUnmergeVector(MachineIRBuilder &B, MachineRegisterInfo &MRI,
   B.buildUnmerge(SubVecs, SrcReg);
 }
 
+// buildBroadcastVector() below implements these destination sizes only; for anything
+// else its else-if chain falls through and builds nothing, while its callers' apply
+// functions replace or erase the original instruction regardless. That leaves the
+// destination register used but undefined -- invalid MIR that -verify-machineinstrs
+// reports as "Reading virtual register without a def", and that otherwise surfaces
+// only when a later pass fails to resolve the register. matchSplatVector() already
+// gates on exactly this set; every G_SHUFFLE_VECTOR-side matcher that can reach
+// buildBroadcastVector() must do the same.
+static bool isBroadcastVectorDstSizeSupported(LLT DstTy) {
+  switch (DstTy.getSizeInBits()) {
+  case 128:
+  case 256:
+  case 512:
+  case 1024:
+  case 2048:
+    return true;
+  default:
+    // unimplemented.
+    return false;
+  }
+}
+
 static void buildBroadcastVector(MachineIRBuilder &B, MachineRegisterInfo &MRI,
                                  Register SrcReg, Register DstVecReg) {
   const AIEBaseInstrInfo &AIETII = (const AIEBaseInstrInfo &)B.getTII();
@@ -3519,25 +3541,8 @@ bool llvm::matchBroadcastElement(MachineInstr &MI, MachineRegisterInfo &MRI,
                                  std::pair<Register, Register> &MatchInfo) {
   assert(MI.getOpcode() == TargetOpcode::G_SHUFFLE_VECTOR);
 
-  // buildBroadcastVector() only implements these destination sizes; for anything
-  // else its else-if chain falls through and builds nothing, while applySplatVector()
-  // erases the original instruction unconditionally. That leaves the destination
-  // register used but undefined, which -verify-machineinstrs reports as "Reading
-  // virtual register without a def" and which otherwise surfaces only when a later
-  // pass fails to resolve it. matchSplatVector(), the G_BUILD_VECTOR-side sibling
-  // feeding the same apply function, gates on exactly this set.
-  const LLT DstVecTy = MRI.getType(MI.getOperand(0).getReg());
-  switch (DstVecTy.getSizeInBits()) {
-  case 128:
-  case 256:
-  case 512:
-  case 1024:
-  case 2048:
-    break;
-  default:
-    // unimplemented.
+  if (!isBroadcastVectorDstSizeSupported(MRI.getType(MI.getOperand(0).getReg())))
     return false;
-  }
 
   const auto MaybeSplatIndex = getSplatIndex(MI);
 
@@ -4155,6 +4160,9 @@ bool llvm::matchShuffleToBroadcast(MachineInstr &MI, MachineRegisterInfo &MRI,
   ArrayRef<int> Mask = MI.getOperand(3).getShuffleMask();
 
   if (MaskMatch::isMaskWithAllUndefs(Mask))
+    return false;
+
+  if (!isBroadcastVectorDstSizeSupported(MRI.getType(MI.getOperand(0).getReg())))
     return false;
 
   if (matchShuffleToVecBroadcast(MI, MRI, TII, MatchInfo))
