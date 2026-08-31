@@ -1,0 +1,36 @@
+#
+# This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
+# RUN: llc -mtriple=aie2p -run-pass=aie-prelegalizer-combiner -global-isel %s -verify-machineinstrs -o - | FileCheck %s
+
+# buildBroadcastVector() implements destination sizes {128,256,512,1024,2048} only.
+# A 64-bit destination falls through its else-if chain and builds nothing, while
+# applySplatVector() erases the original G_SHUFFLE_VECTOR regardless -- leaving the
+# result register used but undefined. matchBroadcastElement() must decline to match
+# instead, the same way matchSplatVector() already does on the G_BUILD_VECTOR side.
+#
+# -verify-machineinstrs above is the guard: without the size check this reports
+# "Reading virtual register without a def" for the G_STORE below.
+---
+name: broadcast_element_64bit_dst_not_combined
+alignment: 16
+legalized: false
+tracksRegLiveness: true
+body: |
+  bb.0:
+    liveins: $p0
+
+    ; CHECK-LABEL: name: broadcast_element_64bit_dst_not_combined
+    ; CHECK: %shuf:_(<8 x s8>) = G_SHUFFLE_VECTOR
+    ; CHECK: G_STORE %shuf
+    %ptr:_(p0) = COPY $p0
+    %zero:_(s8) = G_CONSTANT i8 0
+    %src:_(<8 x s8>) = G_BUILD_VECTOR %zero(s8), %zero(s8), %zero(s8), %zero(s8), %zero(s8), %zero(s8), %zero(s8), %zero(s8)
+    %undef:_(<8 x s8>) = G_IMPLICIT_DEF
+    %shuf:_(<8 x s8>) = G_SHUFFLE_VECTOR %src(<8 x s8>), %undef, shufflemask(0, 0, 0, 0, 0, 0, 0, 0)
+    G_STORE %shuf(<8 x s8>), %ptr(p0) :: (store (<8 x s8>))
+    PseudoRET implicit $lr
+...
